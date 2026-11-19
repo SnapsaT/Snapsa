@@ -1,0 +1,161 @@
+name: SNAPSA Android APK Builder
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'SnapsaApp/**'
+      - '.github/workflows/build-snapsa-android.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout SNAPSA
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install Sharp system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev build-essential pkg-config
+
+      - name: Install dependencies
+        working-directory: SnapsaApp
+        env:
+          SHARP_FORCE_GLOBAL_LIBVIPS: '1'
+        run: npm install --legacy-peer-deps
+
+      - name: Build React application
+        working-directory: SnapsaApp
+        run: npm run build
+
+      - name: Create Android project if missing
+        working-directory: SnapsaApp
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+      - name: Synchronize Capacitor
+        working-directory: SnapsaApp
+        run: npx cap sync android
+
+      - name: Write google-services.json
+        working-directory: SnapsaApp
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
+            echo "Missing GOOGLE_SERVICES_JSON secret"
+            exit 1
+          fi
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
+      - name: Add Google services Gradle plugin
+        working-directory: SnapsaApp/android
+        run: |
+          if ! grep -q "classpath 'com.android.tools.build:gradle" build.gradle; then
+            echo "Could not find the Android Gradle plugin line in build.gradle"
+            exit 1
+          fi
+          if ! grep -q "com.google.gms:google-services" build.gradle; then
+            sed -i "/classpath 'com.android.tools.build:gradle/a\        classpath 'com.google.gms:google-services:4.4.2'" build.gradle
+          fi
+          if ! grep -q "com.google.gms.google-services" app/build.gradle; then
+            echo "apply plugin: 'com.google.gms.google-services'" >> app/build.gradle
+          fi
+
+      - name: Generate Android icons and splash
+        working-directory: SnapsaApp
+        run: npx capacitor-assets generate --android
+
+      - name: Add Android permissions
+        working-directory: SnapsaApp/android/app/src/main
+        run: |
+          MANIFEST=AndroidManifest.xml
+          for P in INTERNET ACCESS_NETWORK_STATE CAMERA RECORD_AUDIO MODIFY_AUDIO_SETTINGS POST_NOTIFICATIONS READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_AUDIO; do
+            if ! grep -q "android.permission.$P\"" "$MANIFEST"; then
+              sed -i "/<application/i\    <uses-permission android:name=\"android.permission.$P\" />" "$MANIFEST"
+            fi
+          done
+          sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
+
+      - name: Configure release signing
+        working-directory: SnapsaApp/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "No keystore secret set; release build will be skipped."
+            exit 0
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/snapsa-release.jks"
+          cat >> app/build.gradle <<EOF
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("$RUNNER_TEMP/snapsa-release.jks")
+                      storePassword "$KEYSTORE_PASSWORD"
+                      keyAlias "$KEY_ALIAS"
+                      keyPassword "$KEY_PASSWORD"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+
+      - name: Compile Android debug APK
+        working-directory: SnapsaApp/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Upload SNAPSA debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SNAPSA-Android-APK
+          path: SnapsaApp/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+      - name: Compile Android release APK
+        working-directory: SnapsaApp/android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ]; then
+            echo "Skipping release build: no keystore secret."
+            exit 0
+          fi
+          ./gradlew assembleRelease
+
+      - name: Upload SNAPSA release APK
+        if: ${{ hashFiles('SnapsaApp/android/app/build/outputs/apk/release/app-release.apk') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: SNAPSA-Android-RELEASE-APK
+          path: SnapsaApp/android/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
