@@ -1,0 +1,49 @@
+services:
+  - type: web
+    name: werntjat-frontend
+    env: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: false
+
+    headers:
+      # WASM must be served as application/wasm
+      - path: /*.wasm
+        name: Content-Type
+        value: application/wasm
+
+      # Required for SharedArrayBuffer (used by some WASM modules)
+      - path: /*
+        name: Cross-Origin-Opener-Policy
+        value: same-origin
+
+      - path: /*
+        name: Cross-Origin-Embedder-Policy
+        value: require-corp
+
+      # Security headers
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+
+      - path: /*
+        name: Strict-Transport-Security
+        value: max-age=31536000; includeSubDomains
+
+      - path: /*
+        name: Referrer-Policy
+        value: strict-origin-when-cross-origin
+
+      - path: /*
+        name: Permissions-Policy
+        value: microphone=(self), camera=(self)
+
+    # SPA routing — all paths serve index.html
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
