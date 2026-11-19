@@ -1,0 +1,40 @@
+{
+  "name": "snapserver",
+  "version": "1.0.0",
+  "description": "Snapsa — Dedicated media + live server for WernTjat",
+  "main": "SnapServer.js",
+  "type": "module",
+  "scripts": {
+    "start": "node SnapServer.js",
+    "dev": "node --watch SnapServer.js"
+  },
+  "author": "FRANS DOMINIQUE VAN DER WERNDTZ",
+  "license": "ISC",
+  "dependencies": {
+    "@aws-sdk/client-ivs": "^3.1016.0",
+    "@aws-sdk/client-ivschat": "^3.1016.0",
+    "aws-sdk": "^2.1693.0",
+    "canvas": "^3.0.0",
+    "cloudinary": "^2.7.0",
+    "cors": "^2.8.6",
+    "ioredis": "^6.0.0",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-rate-limit": "^7.5.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^8.23.0",
+    "multer": "^1.4.5-lts.1",
+    "sharp": "^0.33.5",
+    "uuid": "^10.0.0",
+    "geoip-lite": "^2.0.3",
+    "firebase-admin": "^12.7.0",
+    "ws": "^8.20.0"
+  },
+  "optionalDependencies": {
+    "ffmpeg-static": "^5.3.0",
+    "fluent-ffmpeg": "^2.1.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
