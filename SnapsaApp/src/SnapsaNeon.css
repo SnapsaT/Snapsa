@@ -1,0 +1,100 @@
+/* SNAPSA NEON — richer cyberpunk for Messages / Discover / Music / Lives / Me / Story strip.
+   Import once after SnapsaCyber.css. Needs className="snapsa-tab" on the tab wrappers (edit T1). */
+
+/* Soft glow behind every tab. Fully inside the tab (inset:0), no animation, so nothing can scroll or shift. */
+.snapsa-tab { position: relative; isolation: isolate; overflow: hidden; contain: paint; }
+.snapsa-tab::before {
+  content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(40% 30% at 20% 15%, rgba(180,76,255,.30), transparent 70%),
+    radial-gradient(38% 30% at 85% 45%, rgba(255,45,149,.22), transparent 70%),
+    radial-gradient(45% 35% at 30% 90%, rgba(34,228,255,.12), transparent 70%);
+}
+
+/* Make flat dark panels glow (S.dark / S.card as inline colours) */
+.snapsa-tab [style*="background: rgb(7, 3, 15)"] { background: rgba(7,3,15,.55) !important; }
+.snapsa-tab [style*="background: rgb(21, 11, 40)"] {
+  background: linear-gradient(135deg, rgba(72,24,130,.55), rgba(14,6,28,.9)) !important;
+  border: 1px solid rgba(180,76,255,.45) !important;
+  box-shadow: 0 0 14px rgba(180,76,255,.22), inset 0 0 14px rgba(180,76,255,.08);
+}
+/* Solid pink buttons → neon gradient */
+.snapsa-tab button[style*="background: rgb(255, 45, 149)"] {
+  background: linear-gradient(135deg, #8b2cf5, #ff2d95) !important;
+  box-shadow: 0 0 16px rgba(255,45,149,.55); border: 1px solid rgba(255,138,216,.6) !important;
+}
+
+/* Messages rows → glowing cards */
+.snapsa-dm-row {
+  width: calc(100% - 20px) !important; margin: 7px 10px !important; border-radius: 18px !important;
+  border: 1px solid rgba(180,76,255,.38) !important;
+  background: linear-gradient(135deg, rgba(72,24,130,.5), rgba(14,6,28,.88)) !important;
+  box-shadow: 0 0 12px rgba(180,76,255,.2), inset 0 0 12px rgba(180,76,255,.07);
+  transition: transform .15s, box-shadow .2s;
+}
+.snapsa-dm-row:active { transform: scale(.985); box-shadow: 0 0 20px rgba(255,45,149,.45); }
+.snapsa-dm-row img { box-shadow: 0 0 0 2px #05020a, 0 0 0 4px rgba(255,45,149,.8), 0 0 14px rgba(255,45,149,.6); }
+.snapsa-msg-header {
+  background: linear-gradient(90deg, rgba(139,44,245,.45), rgba(255,45,149,.32)) !important;
+  border-bottom: 1px solid rgba(255,45,149,.55) !important;
+  box-shadow: 0 6px 22px rgba(180,76,255,.25);
+}
+.snapsa-msg-header span { text-shadow: 0 0 14px rgba(255,45,149,.9); letter-spacing: .5px; }
+
+/* Story strip */
+.snapsa-story-ring {
+  
+  box-shadow: 0 0 12px rgba(255,45,149,.75), 0 0 22px rgba(180,76,255,.5);
+}
+@keyframes snapsaRing { 0% { background-position: 0% 50%; } 100% { background-position: 300% 50%; } }
+.snapsa-story-ring--seen { animation: none; box-shadow: none; }
+.snapsa-story-add { box-shadow: 0 0 14px rgba(255,45,149,.6), inset 0 0 8px rgba(255,45,149,.3);  }
+@keyframes snapsaPulse { 50% { box-shadow: 0 0 22px rgba(255,45,149,.95), inset 0 0 10px rgba(255,45,149,.5); } }
+.snapsa-story-strip {
+  background: linear-gradient(180deg, rgba(60,18,110,.55), rgba(11,5,22,.4)); border-radius: 18px;
+  border: 1px solid rgba(180,76,255,.3); box-shadow: 0 0 16px rgba(180,76,255,.2);
+}
+.snapsa-story-wrap { background: linear-gradient(180deg, rgba(43,15,82,.88), rgba(5,2,10,.7)) !important; border-bottom: 1px solid rgba(255,45,149,.5) !important; box-shadow: 0 8px 26px rgba(180,76,255,.3); }
+
+/* Headers: original black with purple / pink / white shooting stars (transform + opacity only) */
+.snapsa-stars { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.snapsa-stars i {
+  position: absolute; top: var(--t); left: 100%; width: 70px; height: 2px; border-radius: 2px; opacity: 0;
+  background: linear-gradient(90deg, var(--c), transparent);
+  box-shadow: 0 0 6px var(--c);
+  transform: translate3d(0,0,0) rotate(-20deg);
+  animation: snapsaShoot var(--d) linear infinite; animation-delay: var(--w);
+  will-change: transform, opacity;
+}
+@keyframes snapsaShoot {
+  0% { transform: translate3d(0,0,0) rotate(-20deg); opacity: 0; }
+  3% { opacity: 1; }
+  20% { transform: translate3d(-110vw,40vw,0) rotate(-20deg); opacity: 0; }
+  100% { transform: translate3d(-110vw,40vw,0) rotate(-20deg); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) { .snapsa-tab::before, .snapsa-story-ring, .snapsa-story-add, .snapsa-stars i { animation: none !important; } }
+
+/* ===== Offline videos mode: bottom nav glows ember ===== */
+.snapsa-bottom-nav.offline-ember .snapsa-nav-inner {
+  border-color: rgba(255,110,20,.95);
+  box-shadow: 0 -4px 22px rgba(255,90,0,.38), 0 0 28px rgba(255,100,10,.5), inset 0 0 14px rgba(255,100,10,.12);
+
+}
+.snapsa-bottom-nav.offline-ember .snapsa-nav-inner::before {
+  background: linear-gradient(90deg, transparent, #ff4d00, #ffb347, #ff4d00, transparent);
+  box-shadow: 0 0 12px #ff6a00;
+}
+.snapsa-bottom-nav.offline-ember .snapsa-nav-item { color: #ffb27a; }
+.snapsa-bottom-nav.offline-ember .snapsa-nav-item .snapsa-nav-icon { color: #ff9a4a; filter: drop-shadow(0 0 5px rgba(255,110,20,.85)); transform: none; }
+.snapsa-bottom-nav.offline-ember .snapsa-nav-item.active { color: #ffb27a; }
+.snapsa-bottom-nav.offline-ember .snapsa-nav-item.active::before { display: none; }
+.snapsa-bottom-nav.offline-ember .snapsa-nav-item.active .snapsa-nav-label { font-weight: 600; text-shadow: none; }
+.snapsa-bottom-nav.offline-ember .snapsa-create-button {
+  border-color: #ff6a1a;
+  box-shadow: 0 0 7px #ff7a1a, 0 0 18px rgba(255,90,0,.85), 0 0 32px rgba(255,70,0,.35), inset 0 0 14px rgba(255,90,0,.3);
+}
+.snapsa-bottom-nav.offline-ember .snapsa-create-button svg { filter: drop-shadow(0 0 5px #ff7a1a); }
+@keyframes snapsaEmber {
+  50% { box-shadow: 0 -4px 30px rgba(255,100,0,.6), 0 0 40px rgba(255,120,20,.75), inset 0 0 18px rgba(255,100,10,.2); }
+}

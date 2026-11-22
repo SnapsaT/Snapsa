@@ -1,0 +1,700 @@
+
+/* =========================================
+   SNAPSA FUTURISTIC CHAT SCREEN
+   Neon purple / glass / mobile-first
+========================================= */
+
+.snapsa-chat-screen {
+  position: relative;
+
+  display: flex;
+  flex-direction: column;
+
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+
+  overflow: hidden;
+
+  background: #05040a;
+  color: #ffffff;
+
+  font-family: inherit;
+}
+
+/* =========================================
+   BRAND HEADER
+========================================= */
+
+.snapsa-brand-header {
+  flex-shrink: 0;
+  position: relative;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  height: 90px;
+  padding: 10px;
+
+  background: #09070e;
+
+  border-bottom: 1px solid rgba(180, 0, 255, 0.12);
+}
+
+.snapsa-brand-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.snapsa-brand-symbol {
+  font-size: 38px;
+  font-weight: 900;
+  font-style: italic;
+
+  background: linear-gradient(
+    135deg,
+    #e6a4ff,
+    #b600ff,
+    #6500cc
+  );
+
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+
+  filter: drop-shadow(0 0 9px rgba(190, 0, 255, 0.3));
+}
+
+.snapsa-brand-name {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 1.5px;
+}
+
+.snapsa-brand-header img {
+  max-width: 180px;
+  max-height: 48px;
+  object-fit: contain;
+}
+
+.snapsa-brand-tagline {
+  margin-top: 2px;
+
+  font-size: 7px;
+  letter-spacing: 2.3px;
+
+  color: #aaa2b7;
+}
+
+/* =========================================
+   CONTACT HEADER
+========================================= */
+
+.snapsa-chat-header {
+  position: relative;
+  z-index: 10;
+
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  flex-shrink: 0;
+
+  height: 86px;
+  padding: 0 12px;
+
+  background: rgba(11, 9, 19, 0.94);
+
+  border-bottom: 1px solid rgba(190, 0, 255, 0.15);
+}
+
+.snapsa-header-icon,
+.snapsa-header-action {
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 38px;
+  height: 42px;
+
+  border: none;
+  background: transparent;
+
+  color: #ded8ea;
+
+  cursor: pointer;
+}
+
+.snapsa-header-action {
+  color: #ce48ff;
+}
+
+.snapsa-header-action:active,
+.snapsa-header-icon:active {
+  transform: scale(0.92);
+}
+
+.snapsa-contact-avatar-wrap {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.snapsa-contact-avatar {
+  width: 48px;
+  height: 48px;
+
+  display: block;
+
+  object-fit: cover;
+
+  border-radius: 50%;
+
+  border: 2px solid rgba(200, 60, 255, 0.65);
+
+  box-shadow: 0 0 10px rgba(175, 0, 255, 0.15);
+}
+
+.snapsa-online-dot {
+  position: absolute;
+  right: 0;
+  bottom: 1px;
+
+  width: 11px;
+  height: 11px;
+
+  background: #35e891;
+
+  border: 2px solid #0d0a16;
+  border-radius: 50%;
+
+  box-shadow: 0 0 8px rgba(53, 232, 145, 0.4);
+}
+
+.snapsa-contact-details {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.snapsa-contact-name {
+  font-size: 14px;
+  font-weight: 800;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snapsa-contact-status {
+  margin-top: 4px;
+
+  color: #a59bb4;
+  font-size: 11px;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* =========================================
+   CHAT WALLPAPER
+========================================= */
+
+.snapsa-chat-messages {
+  position: relative;
+
+  flex: 1;
+  min-height: 0;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  background-color: #06040b;
+
+  background-image:
+    url("https://images.unsplash.com/photo-1519608487953-e999c86e7455");
+
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  scrollbar-width: thin;
+  scrollbar-color: rgba(170, 0, 255, 0.3) transparent;
+}
+
+.snapsa-chat-wallpaper-overlay {
+  position: absolute;
+  inset: 0;
+
+  background: linear-gradient(
+    180deg,
+    rgba(3, 3, 10, 0.62),
+    rgba(3, 3, 10, 0.28) 35%,
+    rgba(3, 3, 10, 0.43) 70%,
+    rgba(3, 3, 10, 0.72)
+  );
+
+  pointer-events: none;
+}
+
+.snapsa-message-list {
+  position: relative;
+  z-index: 1;
+
+  display: flex;
+  flex-direction: column;
+
+  padding: 14px 12px 24px;
+}
+
+/* =========================================
+   DATE SEPARATOR
+========================================= */
+
+.snapsa-date-separator {
+  display: flex;
+  justify-content: center;
+
+  margin: 18px 0 22px;
+}
+
+.snapsa-date-separator span {
+  padding: 7px 15px;
+
+  border: 1px solid rgba(200, 160, 255, 0.12);
+  border-radius: 30px;
+
+  background: rgba(24, 19, 40, 0.72);
+
+  color: #c2b9d3;
+
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* =========================================
+   MESSAGE ROWS
+========================================= */
+
+.snapsa-message-row {
+  display: flex;
+  width: 100%;
+
+  margin-bottom: 12px;
+}
+
+.snapsa-message-row.theirs {
+  justify-content: flex-start;
+}
+
+.snapsa-message-row.mine {
+  justify-content: flex-end;
+}
+
+/* =========================================
+   MESSAGE BUBBLES
+========================================= */
+
+.snapsa-message-bubble {
+  max-width: min(78%, 340px);
+
+  min-width: 65px;
+
+  padding: 11px 14px 8px;
+
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.snapsa-message-bubble.incoming {
+  background: rgba(23, 20, 36, 0.88);
+
+  border: 1px solid rgba(255, 255, 255, 0.065);
+
+  border-radius: 7px 20px 20px 20px;
+
+  color: #f6f3fc;
+
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.16);
+}
+
+.snapsa-message-bubble.outgoing {
+  background: linear-gradient(
+    135deg,
+    #9c00f7 0%,
+    #c500ed 48%,
+    #e126a7 100%
+  );
+
+  border: 1px solid rgba(255, 255, 255, 0.13);
+
+  border-radius: 20px 7px 20px 20px;
+
+  color: #ffffff;
+
+  box-shadow:
+    0 4px 16px rgba(158, 0, 255, 0.2);
+}
+
+.snapsa-message-content {
+  font-size: 14px;
+  line-height: 1.5;
+
+  white-space: pre-wrap;
+}
+
+/* Message time and ticks */
+
+.snapsa-message-meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+
+  margin-top: 5px;
+}
+
+.snapsa-message-time {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.snapsa-message-receipt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: #f5d6ff;
+}
+
+/* =========================================
+   COMPOSER AREA
+========================================= */
+
+.snapsa-composer-area {
+  position: relative;
+  z-index: 15;
+
+  flex-shrink: 0;
+
+  padding: 8px 10px 8px;
+
+  background: rgba(5, 4, 11, 0.95);
+}
+
+.snapsa-composer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  width: 100%;
+  min-height: 58px;
+
+  padding: 5px 7px;
+
+  background: rgba(24, 19, 39, 0.96);
+
+  border: 1px solid rgba(175, 0, 255, 0.3);
+  border-radius: 40px;
+
+  box-shadow:
+    0 0 12px rgba(130, 0, 255, 0.09),
+    inset 0 0 10px rgba(180, 0, 255, 0.025);
+}
+
+.snapsa-composer-icon {
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 39px;
+  height: 39px;
+
+  border: none;
+  border-radius: 50%;
+
+  background: transparent;
+
+  color: #c7a9ed;
+
+  cursor: pointer;
+}
+
+.snapsa-composer-icon.emoji {
+  color: #b9a8d2;
+}
+
+.snapsa-message-input {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+
+  padding: 0 8px;
+
+  outline: none;
+  border: none;
+
+  background: transparent;
+
+  color: white;
+  font-size: 15px;
+}
+
+.snapsa-message-input::placeholder {
+  color: #8f879e;
+}
+
+.snapsa-send-button,
+.snapsa-mic-button {
+  flex-shrink: 0;
+
+  width: 45px;
+  height: 45px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: none;
+  border-radius: 50%;
+
+  color: white;
+
+  cursor: pointer;
+}
+
+.snapsa-send-button {
+  background: linear-gradient(135deg, #bb00ff, #e02ab0);
+
+  box-shadow: 0 0 14px rgba(185, 0, 255, 0.3);
+}
+
+.snapsa-mic-button {
+  background: linear-gradient(135deg, #a900ff, #d020ff);
+
+  box-shadow: 0 0 16px rgba(170, 0, 255, 0.32);
+}
+
+/* =========================================
+   BOTTOM NAVIGATION
+========================================= */
+
+.snapsa-chat-bottom-nav {
+  position: relative;
+  z-index: 20;
+
+  flex-shrink: 0;
+
+  padding: 0 3px calc(8px + env(safe-area-inset-bottom, 0px));
+
+  background: #05040b;
+}
+
+.snapsa-chat-nav-inner {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+
+  width: 100%;
+  height: 86px;
+
+  padding: 0 2px;
+
+  background: rgba(10, 7, 20, 0.98);
+
+  border: 1px solid rgba(175, 0, 255, 0.6);
+  border-radius: 35px;
+
+  box-shadow:
+    0 0 18px rgba(160, 0, 255, 0.15),
+    inset 0 0 12px rgba(180, 0, 255, 0.035);
+}
+
+.snapsa-chat-nav-item {
+  position: relative;
+
+  flex: 1;
+  min-width: 0;
+  height: 74px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+
+  padding: 0 2px;
+
+  background: transparent;
+  border: none;
+  border-radius: 19px;
+
+  color: #9d96ad;
+
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.snapsa-chat-nav-item > span {
+  font-size: 10px;
+  font-weight: 600;
+
+  white-space: nowrap;
+}
+
+.snapsa-chat-nav-icon {
+  position: relative;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.snapsa-chat-nav-item.active {
+  color: #ffffff;
+
+  background: linear-gradient(
+    180deg,
+    rgba(180, 0, 255, 0.16),
+    rgba(100, 0, 180, 0.04)
+  );
+
+  border: 1px solid rgba(190, 0, 255, 0.22);
+
+  box-shadow:
+    0 0 14px rgba(150, 0, 255, 0.14);
+}
+
+.snapsa-chat-nav-item.active svg {
+  color: #e126ff;
+
+  filter:
+    drop-shadow(0 0 5px #c000ff)
+    drop-shadow(0 0 9px rgba(190, 0, 255, 0.5));
+}
+
+.snapsa-chat-nav-item.active > span {
+  font-weight: 800;
+}
+
+.snapsa-chat-nav-badge {
+  position: absolute;
+  top: -7px;
+  right: -10px;
+
+  min-width: 18px;
+  height: 18px;
+
+  padding: 0 3px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: #ff1680;
+  color: white;
+
+  border: 1px solid #160a20;
+  border-radius: 20px;
+
+  font-size: 10px;
+  font-weight: 900;
+}
+
+/* Central create button */
+
+.snapsa-chat-create {
+  position: relative;
+  z-index: 5;
+
+  flex: 0 0 78px;
+  width: 78px;
+  height: 78px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  margin-top: -36px;
+
+  background: radial-gradient(
+    circle at center,
+    #320047,
+    #13001e 75%,
+    #08000d
+  );
+
+  border: 5px solid #d21cff;
+  border-radius: 50%;
+
+  color: white;
+
+  box-shadow:
+    0 0 8px #dc1aff,
+    0 0 22px rgba(180, 0, 255, 0.6),
+    inset 0 0 12px rgba(190, 0, 255, 0.25);
+
+  cursor: pointer;
+}
+
+/* =========================================
+   RESPONSIVE
+========================================= */
+
+@media (max-width: 390px) {
+  .snapsa-brand-header {
+    height: 76px;
+  }
+
+  .snapsa-chat-header {
+    height: 76px;
+    gap: 5px;
+    padding: 0 6px;
+  }
+
+  .snapsa-contact-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .snapsa-contact-name {
+    font-size: 12px;
+  }
+
+  .snapsa-contact-status {
+    font-size: 10px;
+  }
+
+  .snapsa-header-icon,
+  .snapsa-header-action {
+    width: 31px;
+  }
+
+  .snapsa-chat-nav-inner {
+    height: 78px;
+  }
+
+  .snapsa-chat-nav-item > span {
+    font-size: 9px;
+  }
+
+  .snapsa-chat-nav-item svg {
+    width: 21px;
+    height: 21px;
+  }
+
+  .snapsa-chat-create {
+    flex-basis: 68px;
+    width: 68px;
+    height: 68px;
+  }
+}
