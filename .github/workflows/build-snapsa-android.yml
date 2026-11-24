@@ -10,7 +10,7 @@ on:
       - '.github/workflows/build-snapsa-android.yml'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-android:
@@ -159,3 +159,18 @@ jobs:
           name: SNAPSA-Android-RELEASE-APK
           path: SnapsaApp/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
+
+      - name: Rename APK for GitHub Release
+        run: cp SnapsaApp/android/app/build/outputs/apk/release/app-release.apk Snapsa.apk
+
+      - name: Publish SNAPSA GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: SNAPSA v1.0.${{ github.run_number }}
+          body: |
+            SNAPSA for Android.
+            - Download Snapsa.apk and install it on your Android device.
+          files: Snapsa.apk
+          make_latest: true
+
