@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Get SNAPSA for Android</title>
+<meta name="description" content="SNAPSA — your world, all in one place. Download the Android app.">
+<meta name="theme-color" content="#100d20">
+<link rel="icon" type="image/png" href="docs/icon.png">
+<style>
+:root {
+  color-scheme: dark;
+  --bg:#100d20; --panel:#100d20; --text:#fff; --muted:#c9c3d8;
+  --pink:#e83291; --purple:#9227ee;
+}
+* { box-sizing:border-box; }
+html { min-height:100%; background:var(--bg); }
+body {
+  margin:0; min-height:100vh; color:var(--text);
+  background:radial-gradient(ellipse 85% 48% at 50% 0%, #28104a 0%, #171027 52%, var(--bg) 100%);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+}
+.wrap { width:min(100% - 32px, 560px); margin:0 auto; padding:24px 0 34px; }
+.logo-frame {
+  margin:0 auto; overflow:hidden; border-radius:42px;
+  background:#080512; box-shadow:0 18px 48px rgba(0,0,0,.38),0 0 28px rgba(146,39,238,.13);
+  border:1px solid rgba(255,255,255,.07);
+}
+.logo-art { display:block; width:100%; height:auto; }
+.get-title { margin:24px 0 0; text-align:center; font-size:27px; font-weight:800; letter-spacing:-.5px; }
+.pitch { margin:12px 0 24px; text-align:center; color:#d0c9df; font-size:16px; line-height:1.5; }
+.download-card { padding:0 8px; }
+.btn {
+  display:flex; align-items:center; justify-content:center; gap:12px; width:100%;
+  min-height:72px; padding:18px 20px; border:0; border-radius:22px;
+  background:var(--pink); color:#fff; font-size:18px; font-weight:800;
+  text-decoration:none; text-align:center;
+  box-shadow:0 10px 28px rgba(232,50,145,.25);
+  transition:transform .15s ease,filter .15s ease;
+}
+.btn:active { transform:scale(.985); filter:brightness(.95); }
+.btn svg { width:23px; height:23px; flex:none; }
+.meta { display:flex; justify-content:center; align-items:center; gap:10px; flex-wrap:wrap; margin-top:16px; color:var(--muted); font-size:13px; }
+.pill { padding:5px 14px; border-radius:999px; background:rgba(255,255,255,.08); }
+.pill:empty { display:none; }
+.minimum { margin:17px 8px 0; color:#bcb4cf; font-size:14px; }
+.extra { margin-top:20px; padding:18px; border:1px solid rgba(180,76,255,.22); border-radius:18px; background:rgba(21,11,40,.48); }
+.extra[hidden] { display:none; }
+.extra h2 { margin:0 0 9px; font-size:13px; letter-spacing:1px; text-transform:uppercase; color:var(--muted); }
+.notes { margin:0; white-space:pre-wrap; font-size:14px; line-height:1.6; color:#e9e2ff; }
+.old ul { list-style:none; margin:0; padding:0; }
+.old li { display:flex; justify-content:space-between; gap:12px; padding:9px 0; border-bottom:1px solid rgba(255,255,255,.07); font-size:14px; }
+.old a { color:#e8b7ff; text-decoration:none; }
+footer { margin-top:34px; text-align:center; color:#a59bc4; font-size:12px; }
+@media (max-width:380px) {
+  .wrap { width:min(100% - 24px,560px); padding-top:18px; }
+  .logo-frame { border-radius:32px; }
+  .btn { min-height:64px; font-size:16px; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+  <div class="logo-frame">
+    <img class="logo-art" src="docs/icon.png" alt="SNAPSA — Your world. All in one place.">
+  </div>
+
+  <h1 class="get-title">Get SNAPSA</h1>
+  <p class="pitch">Watch it. Play it. Connect. Create. Trade.</p>
+
+  <section class="download-card" aria-label="Download SNAPSA">
+    <a id="dl" class="btn" href="https://github.com/SnapsaT/Snapsa/releases/latest">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Download SNAPSA APK</span>
+    </a>
+    <div class="meta">
+      <span class="pill" id="ver">Android</span>
+      <span class="pill" id="size"></span>
+      <span class="pill" id="date"></span>
+    </div>
+    <p class="minimum">Official GitHub App.</p>
+  </section>
+
+  <section class="extra" id="notesCard" hidden>
+    <h2>What's new</h2>
+    <p class="notes" id="notes"></p>
+  </section>
+
+  <section class="extra old" id="oldCard" hidden>
+    <h2>Older versions</h2>
+    <ul id="old"></ul>
+  </section>
+
+  <footer>© SNAPSA · by Snapsa Technologies</footer>
+</main>
+
+<script>
+const OWNER = "SnapsaT";
+const REPO  = "Snapsa";
+const $ = id => document.getElementById(id);
+const mb = bytes => (bytes / 1048576).toFixed(1) + " MB";
+const apkOf = release => (release.assets || []).find(asset => /\.apk$/i.test(asset.name));
+
+fetch(`https://api.github.com/repos/${OWNER}/${REPO}/releases?per_page=8`, {
+  headers: { Accept: "application/vnd.github+json" }
+})
+.then(response => response.ok ? response.json() : Promise.reject(new Error("Release lookup failed")))
+.then(releases => {
+  const available = releases.filter(release => !release.draft && !release.prerelease && apkOf(release));
+  if (!available.length) return;
+  const latest = available[0];
+  const apk = apkOf(latest);
+  $("dl").href = apk.browser_download_url;
+  $("ver").textContent = latest.tag_name || "Android";
+  $("size").textContent = mb(apk.size);
+  if (latest.published_at) {
+    $("date").textContent = new Date(latest.published_at).toLocaleDateString(undefined, {
+      day: "numeric", month: "short", year: "numeric"
+    });
+  }
+  if (latest.body && latest.body.trim()) {
+    $("notes").textContent = latest.body.trim();
+    $("notesCard").hidden = false;
+  }
+  if (available.length > 1) {
+    $("old").innerHTML = available.slice(1).map(release => {
+      const asset = apkOf(release);
+      const item = document.createElement("li");
+      const version = document.createElement("span");
+      const link = document.createElement("a");
+      version.textContent = release.tag_name;
+      link.href = asset.browser_download_url;
+      link.textContent = "Download";
+      item.append(version, link);
+      return item.outerHTML;
+    }).join("");
+    $("oldCard").hidden = false;
+  }
+})
+.catch(() => {
+  // Keep the GitHub Releases fallback link available if the API is unavailable.
+});
+</script>
+</body>
+</html>
