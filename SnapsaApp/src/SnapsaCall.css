@@ -1,0 +1,58 @@
+/* ===== SNAPSA CALL EXPERIENCE ===== */
+.snapsa-voice, .snapsa-video { position: fixed; inset: 0; width: 100%; height: 100dvh; overflow: hidden; color: #fff; background: #07020f center/cover no-repeat; font-family: inherit; isolation: isolate; z-index: 900; }
+.snapsa-video { background-image: url(/SnapsaCallBg.jpg); }
+.voice-shade { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(2,0,10,.05), rgba(6,0,17,.04) 55%, rgba(3,0,12,.35)); pointer-events: none; }
+
+/* VOICE */
+.voice-center { position: absolute; top: 30%; left: 0; width: 100%; display: flex; flex-direction: column; align-items: center; }
+.voice-rings { position: relative; width: clamp(190px, 54vw, 270px); aspect-ratio: 1; display: grid; place-items: center; }
+.voice-avatar { width: 68%; height: 68%; border-radius: 50%; overflow: hidden; background: linear-gradient(135deg,#7b12ff,#ed168f); border: 4px solid #d23fd0; box-shadow: 0 0 18px #a020f0, 0 0 50px rgba(180,40,255,.5); display: grid; place-items: center; position: relative; z-index: 2; }
+.voice-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.voice-avatar span { font-size: 60px; font-weight: 700; }
+.voice-ring { position: absolute; border-radius: 50%; border: 2px solid rgba(185,72,255,.7); box-shadow: 0 0 15px #8b22ff; }
+.ring-1 { width: 82%; height: 82%; }
+.ring-2 { width: 100%; height: 100%; animation: voicePulse 2.2s ease-out infinite; }
+.ring-3 { width: 115%; height: 115%; border-color: rgba(225,60,255,.35); animation: voicePulse 2.2s ease-out infinite .7s; }
+.voice-rings.active .ring-1 { animation: voiceGlow 1s ease-in-out infinite alternate; }
+@keyframes voicePulse { 0% { transform: scale(.92); opacity: .8; } 100% { transform: scale(1.18); opacity: 0; } }
+@keyframes voiceGlow { from { box-shadow: 0 0 8px #a020f0; } to { box-shadow: 0 0 30px #e52dff; } }
+.voice-name { margin: 28px 18px 6px; text-align: center; font-size: clamp(19px,5vw,27px); font-weight: 700; overflow-wrap: anywhere; }
+.voice-status { color: #cfc3dc; font-size: 17px; margin: 6px 0; }
+.voice-wave { width: min(88%,420px); height: 100px; display: flex; justify-content: center; align-items: center; gap: 3px; margin-top: 30px; }
+.voice-wave span { width: 3px; height: var(--bar); max-height: 65px; border-radius: 5px; background: linear-gradient(to top,#8b13ff,#ed35f9,#ff52be); box-shadow: 0 0 8px rgba(190,50,255,.8); transform: scaleY(.35); opacity: .6; }
+.voice-wave.playing span { animation: soundWave .7s ease-in-out infinite alternate; animation-delay: var(--delay); }
+@keyframes soundWave { from { transform: scaleY(.25); opacity: .5; } to { transform: scaleY(1); opacity: 1; } }
+.voice-controls { position: absolute; bottom: max(6%,30px); left: 0; right: 0; display: flex; justify-content: center; align-items: center; gap: clamp(18px,6vw,36px); padding: 0 15px; }
+.voice-button { display: flex; flex-direction: column; align-items: center; gap: 9px; border: 0; background: none; color: #fff; cursor: pointer; }
+.voice-button svg { width: 66px; height: 66px; padding: 20px; border-radius: 50%; background: rgba(60,40,90,.55); border: 1px solid rgba(255,255,255,.12); fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.voice-button.selected svg { background: #8c21d9; }
+.voice-button span { font-size: 12px; }
+.voice-button.end-call svg { width: 76px; height: 76px; background: #e90032; border: none; box-shadow: 0 0 22px rgba(255,0,65,.45); padding: 20px; }
+.voice-button.answer-call svg { width: 76px; height: 76px; background: #16a34a; border: none; box-shadow: 0 0 22px rgba(22,163,74,.5); padding: 21px; }
+
+/* VIDEO — stage keeps the frame artwork's proportions (941 x 1672) */
+.sv-stage { position: absolute; left: 0; width: 100%; height: min(100dvh, 195vw); top: calc((100dvh - min(100dvh, 195vw)) / 2); }
+.sv-frame { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; user-select: none; }
+.sv-remote { position: absolute; z-index: 1; left: 4.89%; top: 23.44%; width: 91.18%; height: 59.57%; border-radius: 3.2vw; overflow: hidden; background: #0a0414; }
+.sv-remote video, .sv-local video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.sv-local video { transform: scaleX(-1); }
+.sv-local { position: absolute; z-index: 1; left: 83.4%; top: 23.56%; width: 12.3%; height: 10.82%; border-radius: 2.3vw; overflow: hidden; background: #16052d; }
+.sv-wait, .sv-camoff { position: absolute; inset: 0; display: grid; place-items: center; color: #d5b4ff; font-size: 13px; text-align: center; padding: 4px; }
+.sv-camoff { background: #16052d; font-size: 10px; }
+.sv-name { position: absolute; z-index: 4; left: 19%; width: 63%; top: 17.6%; height: 4%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: clamp(13px,4vw,19px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 8px rgba(160,60,255,.8); }
+.sv-timer { position: absolute; z-index: 4; left: 40.3%; width: 19.4%; top: 20.6%; height: 3.2%; display: flex; align-items: center; justify-content: center; padding-left: 12%; font-size: clamp(11px,3.3vw,15px); }
+.sv-btn { position: absolute; z-index: 5; top: 90.1%; transform: translate(-50%,-50%); width: 12.5%; aspect-ratio: 1; border: 0; background: transparent; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; padding: 0; }
+.sv-btn svg { width: 46%; height: 46%; fill: none; stroke: #fff; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sv-btn small { position: absolute; top: 108%; font-size: clamp(9px,2.9vw,12px); white-space: nowrap; }
+.sv-end { width: 14%; }
+.sv-end svg { transform: rotate(135deg); width: 52%; height: 52%; fill: #fff; stroke: none; }
+.sv-btn.sv-end small { top: 100%; }
+
+/* Expanded: video fills the screen, controls stay on top */
+.snapsa-video.expanded .sv-remote { left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; z-index: 2; position: fixed; }
+.snapsa-video.expanded .sv-frame, .snapsa-video.expanded .sv-name { opacity: 0; }
+.snapsa-video.expanded .sv-local { position: fixed; left: auto; right: 14px; top: calc(env(safe-area-inset-top,0px) + 14px); width: 92px; height: 130px; z-index: 6; border: 2px solid rgba(255,255,255,.4); border-radius: 14px; }
+.snapsa-video.expanded .sv-timer { z-index: 7; top: calc(env(safe-area-inset-top,0px) + 14px); left: 14px; width: auto; padding: 4px 12px; background: rgba(0,0,0,.5); border-radius: 20px; height: auto; }
+.snapsa-video.expanded .sv-btn { z-index: 8; background: rgba(15,5,30,.65); border-radius: 50%; position: fixed; top: auto; bottom: 34px; }
+.snapsa-video.expanded .sv-btn small { display: none; }
+@media (max-width: 380px) { .voice-button svg { width: 58px; height: 58px; padding: 17px; } }
