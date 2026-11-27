@@ -10,7 +10,7 @@ on:
       - '.github/workflows/build-snapsa-android.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build-android:
@@ -31,15 +31,8 @@ jobs:
           distribution: temurin
           java-version: '21'
 
-      - name: Install Sharp system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libvips-dev build-essential pkg-config
-
       - name: Install dependencies
         working-directory: SnapsaApp
-        env:
-          SHARP_FORCE_GLOBAL_LIBVIPS: '1'
         run: npm install --legacy-peer-deps
 
       - name: Build React application
@@ -86,11 +79,15 @@ jobs:
         working-directory: SnapsaApp
         run: npx capacitor-assets generate --android
 
+      - name: Apply Snapsa Android extras (notification sound, call ringtone, status-bar icon, back button)
+        working-directory: SnapsaApp
+        run: node android-setup/apply.mjs
+
       - name: Add Android permissions
         working-directory: SnapsaApp/android/app/src/main
         run: |
           MANIFEST=AndroidManifest.xml
-          for P in INTERNET ACCESS_NETWORK_STATE CAMERA RECORD_AUDIO MODIFY_AUDIO_SETTINGS POST_NOTIFICATIONS READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_AUDIO; do
+          for P in INTERNET ACCESS_NETWORK_STATE CAMERA RECORD_AUDIO READ_MEDIA_IMAGES READ_MEDIA_VIDEO READ_MEDIA_AUDIO; do
             if ! grep -q "android.permission.$P\"" "$MANIFEST"; then
               sed -i "/<application/i\    <uses-permission android:name=\"android.permission.$P\" />" "$MANIFEST"
             fi
@@ -159,18 +156,3 @@ jobs:
           name: SNAPSA-Android-RELEASE-APK
           path: SnapsaApp/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-
-      - name: Rename APK for GitHub Release
-        run: cp SnapsaApp/android/app/build/outputs/apk/release/app-release.apk Snapsa.apk
-
-      - name: Publish SNAPSA GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: SNAPSA v1.0.${{ github.run_number }}
-          body: |
-            SNAPSA for Android.
-            - Download Snapsa.apk and install it on your Android device.
-          files: Snapsa.apk
-          make_latest: true
-
