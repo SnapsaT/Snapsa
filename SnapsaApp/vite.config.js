@@ -26,13 +26,14 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,   // maps are never used by the app, and they were being packed into the APK
     // WASM files need to be handled correctly
     rollupOptions: {
       output: {
         manualChunks: {
           vendor: ['react', 'react-dom', 'framer-motion'],
           icons: ['lucide-react'],
+          i18n: ['i18next', 'react-i18next'],
         },
       },
     },
