@@ -104,8 +104,8 @@ export const CrewShirtModal = ({ firstName, position, snapFetch, onClose }) => {
       <style>{`@keyframes crewTurn{0%,41%{transform:rotateX(-8deg) rotateY(-10deg)}50%,91%{transform:rotateX(-8deg) rotateY(170deg)}100%{transform:rotateX(-8deg) rotateY(350deg)}}`}</style>
       <p style={{ color: '#fff', fontWeight: 900, fontSize: 16, margin: '0 0 14px', letterSpacing: 1 }}>SNAPSA CREW</p>
       {art === undefined ? <p style={{ color: '#A59BC4' }}>Loading…</p> : (
-        <div style={{ perspective: 1100, width: 'min(88vw, 420px)', aspectRatio: `${ratio}` }} onClick={e => e.stopPropagation()}>
-          <div style={{ position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d', animation: 'crewTurn 7.2s ease-in-out infinite', filter: 'drop-shadow(0 18px 24px rgba(255,45,149,0.35))' }}>
+        <div style={{ perspective: 1100, width: 'min(88vw, 420px)', aspectRatio: `${ratio}`, filter: 'drop-shadow(0 18px 24px rgba(255,45,149,0.35))' }} onClick={e => e.stopPropagation()}>
+          <div style={{ position: 'relative', width: '100%', height: '100%', transformStyle: 'preserve-3d', animation: 'crewTurn 7.2s ease-in-out infinite' }}>
             <div style={{ ...face, containerType: 'inline-size' }}>
               <img src={frontSrc} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} onLoad={e => { const r = e.target.naturalWidth / e.target.naturalHeight; if (r && art.ratio !== r) setArt(a => ({ ...a, ratio: r })); }} />
               <span style={{ ...txt, left: `${L.fx}%`, top: `${L.fy}%`, fontSize: `${L.fs}cqw`, fontFamily: 'Arial, Helvetica, system-ui, sans-serif', fontWeight: 800, color: '#ff22b4', WebkitTextStroke: 0, textShadow: '0 0 6px rgba(255,34,180,0.55)', letterSpacing: '0.02em' }}>{String(firstName || '').toUpperCase()}</span>
