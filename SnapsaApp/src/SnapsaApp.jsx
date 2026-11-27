@@ -845,7 +845,7 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     let crew = opts.crew, official = opts.official;
     if (avatarUrl == null || verified == null || crew == null || official == null) {
       try {
-        const r = await snapFetch('/snapsa/me'); const d = r.ok ? await r.json() : null; const p = d?.profile || {};
+        const r = await snapFetchNetwork('/snapsa/me'); const d = r.ok ? await r.json() : null; const p = d?.profile || {};
         if (avatarUrl == null) avatarUrl = p.avatarUrl || null;
         if (verified == null) verified = !!(p.tier === 'snapsa' || p.snapsaVerified || p.verified || p.wernTier || p.officialLabel || p.crewPosition);
         if (crew == null) crew = p.crewPosition ? 'CREW' : '';
@@ -862,7 +862,7 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     const lh = logoImg ? Math.round(W * logoImg.naturalHeight / logoImg.naturalWidth) : 90;
     const rowH = 118, gap = 14;
     crew = crew || ''; official = official || '';
-    const offH = official ? 70 : 0;
+    const offH = official ? 58 : 0;
     const mainH = lh + gap + rowH + offH + 12;
     const H = Math.ceil(mainH / 0.83);
     const canvas = document.createElement('canvas');
@@ -914,10 +914,11 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     }
     if (official) {
       ctx.save(); ctx.shadowColor = 'transparent';
-      const ph = 48; ctx.font = '800 28px system-ui, sans-serif'; try { ctx.letterSpacing = '3px'; } catch {}
-      const pw = Math.ceil(ctx.measureText(official).width) + 44, px = (W - pw) / 2, py = lh + gap + rowH + 4;
-      ctx.fillStyle = 'rgba(216,27,96,0.92)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, ph / 2) : ctx.rect(px, py, pw, ph); ctx.fill();
-      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(official, W / 2 + 1, py + ph / 2 + 1);
+      const ph = 36; ctx.font = '900 21px system-ui, sans-serif'; try { ctx.letterSpacing = '3px'; } catch {}
+      const pw = Math.ceil(ctx.measureText(String(official).toUpperCase()).width) + 36, px = (W - pw) / 2, py = lh + gap + rowH + 4;
+      const og = ctx.createLinearGradient(px, 0, px + pw, 0); og.addColorStop(0, '#39ff14'); og.addColorStop(1, '#00e5ff');
+      ctx.fillStyle = og; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, ph / 2) : ctx.rect(px, py, pw, ph); ctx.fill();
+      ctx.fillStyle = '#0a0014'; official = String(official).toUpperCase(); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(official, W / 2 + 1, py + ph / 2 + 1);
       ctx.restore();
     }
     // "DISCOVER ON SNAPSA" (only visible on the end screen — the server crops it off the corner mark)
@@ -2471,13 +2472,15 @@ useEffect(() => {
               ? <img src={video.authorAvatarUrl} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{ e.target.style.display='none'; }}/>
               : (video.authorName?.[0]?.toUpperCase() || 'S')}
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <span style={{ color: isOwn ? S.yellow : 'white', fontWeight: 700, fontSize: 14, textShadow: '0 1px 5px rgba(0,0,0,.9)' }}>
                         {video.authorDisplayName || video.authorName}
         </span>
         <AuthorBadges wernTier={video.authorTier} snapsaTier={video.authorSnapsaTier} crew={video.crew} />
           </div>
-          {video.official && <OfficialPill label={video.official} />}
+          {video.official && <OfficialPill label={video.official === true ? 'OFFICIAL' : video.official} />}
+          </div>
           {video.isLive && <span style={{ background: S.pink, color: 'white', fontSize: 10, fontWeight: 900, padding: '2px 8px', borderRadius: 4 }}>LIVE</span>}
         </button>
         {video.series && <p style={{ color: 'rgba(255,255,255,.7)', fontSize: 12, marginBottom: 4 }}>📺 {video.series}</p>}
@@ -3929,6 +3932,8 @@ const scrollRef = useRef(null);
     authorId:    v.authorId,
     authorTier:  v.authorTier||'',
     authorSnapsaTier: v.authorSnapsaTier||'',
+    crew:        v.crew||'',
+    official:    v.official||'',
     series:      v.series||'',
     caption:     v.caption||'',
     likes:       v.likes||0,
@@ -8861,6 +8866,8 @@ const UserProfileScreen = ({ profileUser, onBack, onDM, showToast, currentUser }
                   authorName: userData.username||userData.authorName,
                   authorTier: userData.tier||'',
                   authorSnapsaTier: userData.snapsaTier||'',
+                  crew: userData.crew||'',
+                  official: userData.official||userData.officialLabel||'',
                   caption: v.caption||'',
                   likes: v.likes||0,
                   comments: v.comments||0,
@@ -14451,6 +14458,8 @@ const SnapsaSavedVideoTile = ({ v }) => {
         authorName: v.authorName || 'snapsa_user',
         authorTier: v.authorTier || '',
         authorSnapsaTier: v.authorSnapsaTier || '',
+        crew: v.crew || userData?.crew || '',
+        official: v.official || '',
         caption: v.caption || '',
         likes: v.likes || 0,
         comments: v.comments || 0,

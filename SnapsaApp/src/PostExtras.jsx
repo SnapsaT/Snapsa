@@ -38,7 +38,7 @@ export function PostMeta({ p }) {
 }
 
 export function OfficialPill({ label = 'OFFICIAL' }) {
-  return <span style={{ display: 'inline-block', padding: '1px 9px', borderRadius: 999, fontSize: 9.5, fontWeight: 900, letterSpacing: 1.2, color: '#0a0014', background: 'linear-gradient(135deg,#39ff14,#00e5ff)', boxShadow: '0 0 8px rgba(57,255,20,.55)' }}>{String(label).toUpperCase()}</span>;
+  return <span style={{ display: 'inline-block', padding: '0 7px', lineHeight: '13px', borderRadius: 999, fontSize: 8, fontWeight: 900, letterSpacing: 1, color: '#0a0014', background: 'linear-gradient(135deg,#39ff14,#00e5ff)', boxShadow: '0 0 8px rgba(57,255,20,.55)' }}>{String(label).toUpperCase()}</span>;
 }
 
 /* ───── live countdown pill "🔥 59m 50s" — when it reaches zero the post is gone ───── */
