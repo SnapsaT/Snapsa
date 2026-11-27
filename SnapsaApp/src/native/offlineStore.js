@@ -11,7 +11,7 @@ const INDEX_KEY = 'snapsa_offline_index';
 const SETTINGS_KEY = 'snapsa_offline_settings';
 const DIR = 'snapsa-offline';
 const FALLBACK_MB = 8;                 // used only when a size can't be measured
-export const OPTIONS = [10, 20, 40, 80, 120, 400, 1200];
+export const OPTIONS = [10, 20, 40, 80];
 
 export const isNativeApp = Capacitor.isNativePlatform();
 
@@ -45,6 +45,26 @@ const fetchLatest = async (limit, token) => {
   if (!res.ok) throw new Error('feed');
   const d = await res.json();
   return (d?.videos || []).filter((v) => v && (v.videoUrl || v.videoFile));
+};
+
+export const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// A pool of up to 300 recent videos (the server caps one page at 100). Each download picks a RANDOM sample from it,
+// so the same videos do not come down in the same order every time.
+const fetchPool = async (token) => {
+  const all = [];
+  for (const skip of [0, 100, 200]) {
+    const res = await fetch(`${SNAP_URL}/snapsa/videos/feed?limit=100&skip=${skip}&sort=new`, {
+      headers: { 'Content-Type': 'application/json', ...authHeaders(token) }, cache: 'no-store',
+    });
+    if (!res.ok) { if (skip === 0) throw new Error('feed'); break; }
+    const d = await res.json();
+    const vids = (d?.videos || []).filter((v) => v && (v.videoUrl || v.videoFile));
+    all.push(...vids);
+    if ((d?.videos || []).length < 100) break;
+  }
+  const seen = new Set();
+  return all.filter((v) => { const id = videoId(v); if (seen.has(id)) return false; seen.add(id); return true; });
 };
 
 // Size of one video from a 1-byte range request.
@@ -90,7 +110,7 @@ export async function syncOffline({ count, wifiOnly, token, onProgress }) {
     const type = navigator.connection?.type;
     if (wifiOnly && type && type !== 'wifi' && type !== 'ethernet') throw new Error('not-wifi');
 
-    const wanted = (await fetchLatest(count, token)).slice(0, count);
+    const wanted = shuffle(await fetchPool(token)).slice(0, count);
     let saved = await readIndex();
     // forget index rows whose file has disappeared
     const ok = [];
@@ -130,9 +150,10 @@ export async function syncOffline({ count, wifiOnly, token, onProgress }) {
       onProgress?.(done, wanted.length);
     }
 
-    // keep at most `count` videos: drop the oldest extras
+    // keep at most `count` videos: the ones picked this time first, then the newest older ones
     if (!cancelled && saved.length > count) {
-      const sorted = [...saved].sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+      const picked = new Set(wanted.map(videoId));
+      const sorted = [...saved].sort((a, b) => (picked.has(videoId(b)) - picked.has(videoId(a))) || ((b.savedAt || 0) - (a.savedAt || 0)));
       for (const extra of sorted.slice(count)) await deleteFile(videoId(extra));
       saved = sorted.slice(0, count);
       await writeIndex(saved);
@@ -152,7 +173,7 @@ export async function listOffline() {
       out.push({ ...v, _localSrc: Capacitor.convertFileSrc(uri) });
     } catch { /* file missing (cleared by Android) — skip */ }
   }
-  return out;
+  return shuffle(out);   // watched in a random order each time
 }
 
 export async function offlineSummary() {

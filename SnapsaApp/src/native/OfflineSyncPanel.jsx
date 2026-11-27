@@ -208,7 +208,7 @@ export default function OfflineSyncPanel({ token }) {
 
           {open && !busy && (
             <div style={{ marginTop:12 }}>
-              <p style={{ color:'#bbb', fontSize:12, margin:'0 0 8px' }}>Choose how many of the newest videos to save. Each video is downloaded once.</p>
+              <p style={{ color:'#bbb', fontSize:12, margin:'0 0 8px' }}>Choose how many videos to save. They are picked in random order, and each video is downloaded once.</p>
               {opts === null && <p style={{ color:'#888', fontSize:12 }}>Checking sizes…</p>}
               {opts?.length === 0 && <p style={{ color:'#888', fontSize:12 }}>Could not check sizes. Try again later.</p>}
               {opts?.map(o => (

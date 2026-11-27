@@ -2,8 +2,8 @@
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
 
-export const SNAPSA_CHANNEL_ID = 'snapsa_loud_v3'; // must match android.notification.channelId on the server 
-const OLD_CHANNEL_IDS = ['snapsa_default', 'snapsa_messages_v2']; // created by earlier builds; Android never lets an app change a channel's sound after creation, so we replace it
+export const SNAPSA_CHANNEL_ID = 'snapsa_alerts_v4'; // must match android.notification.channelId on the server 
+const OLD_CHANNEL_IDS = ['snapsa_default', 'snapsa_messages_v2', 'snapsa_loud_v3', 'snapsa_calls_v1']; // created by earlier builds; Android never lets an app change a channel's sound after creation, so we replace it
 
 let listenersAdded = false;
 
