@@ -4,6 +4,22 @@
 // Start a call from anywhere with:  window.dispatchEvent(new CustomEvent('snapsa:startCall', { detail:{ userId, name, video } }))
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import SnapsaCallScreen from './SnapsaCalls';
+import ringbackUrl from './assets/ringback.mp3';
+import endcallUrl from './assets/endcall.mp3';
+
+// Device ringtone for incoming calls (native Android plugin added by android-setup/apply.mjs); falls back to the in-app ping elsewhere
+let _ringPlugin = null;
+const nativeRing = async (on) => {
+  try {
+    const { Capacitor, registerPlugin } = await import('@capacitor/core');
+    if (!Capacitor.isNativePlatform()) return false;
+    if (!_ringPlugin) _ringPlugin = registerPlugin('SnapsaRingtone');
+    if (on) await _ringPlugin.start(); else await _ringPlugin.stop();
+    return true;
+  } catch { return false; }
+};
+const ATTEMPTS_KEY = 'snapsa_call_attempts';
+const OFFLINE_RING_MS = 10000;
 
 const FALLBACK_ICE = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
 const RING_TIMEOUT_MS = 40000;
@@ -30,6 +46,8 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
   const ringTimer = useRef(null);
   const ringTone = useRef(null);
   const tick = useRef(null);
+  const ringback = useRef(null);
+  const nativeRinging = useRef(false);
 
   const post = useCallback(async (to, callId, type, extra = {}, callType = 'audio') => {
     try {
@@ -38,7 +56,12 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
     } catch { return null; }
   }, [snapFetch]);
 
+  const stopRingback = () => { try { ringback.current?.pause(); } catch {} ringback.current = null; };
+  const startRingback = () => { stopRingback(); try { const a = new Audio(ringbackUrl); a.loop = true; a.volume = 0.8; ringback.current = a; a.play().catch(() => {}); } catch {} };
+  const stopRinging = () => { if (nativeRinging.current) { nativeRinging.current = false; nativeRing(false); } };
+  const playEnd = () => { try { const a = new Audio(endcallUrl); a.volume = 0.9; a.play().catch(() => {}); } catch {} };
   const stopTimers = () => {
+    stopRingback(); stopRinging();
     clearTimeout(ringTimer.current); ringTimer.current = null;
     clearInterval(ringTone.current); ringTone.current = null;
     clearInterval(tick.current); tick.current = null;
@@ -55,6 +78,7 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
     callRef.current = null;
     setMuted(false); setCamOff(false);
     if (was) {
+      playEnd();
       setCall(c => (c ? { ...c, status: 'ended', note: note || 'Call ended' } : c));
       setTimeout(() => setCall(null), 1400);
     }
@@ -94,7 +118,7 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
     pc.onconnectionstatechange = () => {
       const s = pc.connectionState;
       if (s === 'connected' && callRef.current) {
-        clearTimeout(ringTimer.current); clearInterval(ringTone.current);
+        clearTimeout(ringTimer.current); clearInterval(ringTone.current); stopRingback();
         setCall(cc => (cc ? { ...cc, status: 'active' } : cc));
         if (!tick.current) { const t0 = Date.now(); setSecs(0); tick.current = setInterval(() => setSecs(Math.floor((Date.now() - t0) / 1000)), 1000); }
       } else if (s === 'failed') {
@@ -105,11 +129,40 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
     return pc;
   };
 
+  const queueAttempt = (c) => {
+    try {
+      const list = JSON.parse(localStorage.getItem(ATTEMPTS_KEY) || '[]');
+      list.push({ to: c.peerId, callType: c.video ? 'video' : 'audio', callId: c.id, at: Date.now() });
+      localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(list.slice(-20)));
+    } catch {}
+  };
+  const flushAttempts = useCallback(async () => {
+    if (!navigator.onLine) return;
+    let list = [];
+    try { list = JSON.parse(localStorage.getItem(ATTEMPTS_KEY) || '[]'); } catch {}
+    if (!list.length) return;
+    const left = [];
+    for (const a of list) {
+      try { const r = await snapFetch('/snapsa/call/attempt', { method: 'POST', body: JSON.stringify(a) }); if (!r.ok && r.status >= 500) left.push(a); } catch { left.push(a); }
+    }
+    try { localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(left)); } catch {}
+  }, [snapFetch]);
+  const offlineAttempt = (c) => {
+    clearTimeout(ringTimer.current);
+    ringTimer.current = setTimeout(() => {
+      if (callRef.current?.id !== c.id) return;
+      queueAttempt(c); flushAttempts();
+      cleanup('No connection');
+    }, OFFLINE_RING_MS);
+  };
+
   const startCall = useCallback(async ({ userId, name, video, avatar }) => {
     if (callRef.current) { showToast?.('You are already in a call', 'info'); return; }
-    if (!navigator.onLine) { showToast?.('You need to be online to call', 'error'); return; }
     const c = { id: newId(), peerId: String(userId), peerName: name || 'Snapsa user', avatar: avatar || '', video: !!video, dir: 'out', status: 'ringing' };
     callRef.current = c; setCall({ ...c, note: '' });
+    startRingback();
+    // No connection: it still rings for 10 s, then ends and the attempt is sent as soon as you are back online
+    if (!navigator.onLine) { offlineAttempt(c); return; }
     const stream = await getMedia(c.video);
     if (!stream) { cleanup('Could not start the call'); return; }
     try {
@@ -117,7 +170,7 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
       const r = await post(c.peerId, c.id, 'offer', { sdp: offer.sdp }, c.video ? 'video' : 'audio');
-      if (!r) { cleanup('Could not reach them'); return; }
+      if (!r) { offlineAttempt(c); return; }
       if (r.delivered === false && !r.queued) { cleanup(`${c.peerName} is not available right now`); return; }
       ringTimer.current = setTimeout(() => {
         const cur = callRef.current;
@@ -128,7 +181,7 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
 
   const accept = async () => {
     const c = callRef.current; if (!c || c.dir !== 'in') return;
-    clearInterval(ringTone.current);
+    clearInterval(ringTone.current); stopRinging();
     setCall(cc => (cc ? { ...cc, status: 'connecting' } : cc));
     const stream = await getMedia(c.video);
     if (!stream) { await post(c.peerId, c.id, 'decline', {}, c.video ? 'video' : 'audio'); cleanup('Call declined'); return; }
@@ -145,17 +198,13 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
   const decline = async () => { const c = callRef.current; if (c) await post(c.peerId, c.id, 'decline', {}, c.video ? 'video' : 'audio'); cleanup('Call declined'); };
   const hangup = async () => { const c = callRef.current; if (c) await post(c.peerId, c.id, 'end', {}, c.video ? 'video' : 'audio'); cleanup('Call ended'); };
 
-  // Channel for the "Incoming call" push (rings even when the app is closed)
+  // The "snapsa_calls_v2" channel (device ringtone) is created natively by android-setup/apply.mjs at build time.
+  // Send any call attempts that were made while offline
   useEffect(() => {
-    (async () => {
-      try {
-        const { Capacitor } = await import('@capacitor/core');
-        if (!Capacitor.isNativePlatform()) return;
-        const { PushNotifications } = await import('@capacitor/push-notifications');
-        await PushNotifications.createChannel({ id: 'snapsa_calls_v1', name: 'Calls', description: 'Incoming Snapsa calls', importance: 5, visibility: 1, vibration: true, lights: true, lightColor: '#FF2D95', sound: 'snapsa_ping' });
-      } catch {}
-    })();
-  }, []);
+    flushAttempts();
+    window.addEventListener('online', flushAttempts);
+    return () => window.removeEventListener('online', flushAttempts);
+  }, [flushAttempts]);
 
   // incoming signals
   useEffect(() => {
@@ -167,8 +216,12 @@ export default function SnapsaCallHost({ snapFetch, playPing, showToast }) {
         const inc = { id: m.callId, peerId: String(m.from), peerName: m.fromName || 'Snapsa user', avatar: m.fromAvatar || '', video: m.callType === 'video', dir: 'in', status: 'incoming' };
         callRef.current = inc; offerSdp.current = m.sdp; pendingIce.current = [];
         setCall({ ...inc, note: '' });
-        playPing?.();
-        ringTone.current = setInterval(() => playPing?.(), 1800);
+        nativeRing(true).then(ok => {
+          if (ok && callRef.current?.id === inc.id) { nativeRinging.current = true; return; }
+          if (callRef.current?.id !== inc.id) { nativeRing(false); return; }
+          playPing?.();
+          ringTone.current = setInterval(() => playPing?.(), 1800);
+        });
         ringTimer.current = setTimeout(() => { if (callRef.current?.id === inc.id) cleanup('Missed call'); }, RING_TIMEOUT_MS + 3000);
         return;
       }

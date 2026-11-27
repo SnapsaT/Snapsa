@@ -1,17 +1,18 @@
 // src/PostsScreen.jsx — opened by the "posts" button on the feed: read other people's posts and write your own.
 // Composer = the WernPost composer: modes, Media/Camera/Annotate, Tag, Place, Feel, Mood, Song, Poll, Q&A and timed Burn.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Heart, MessageCircle, Eye, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
+import { ArrowLeft, Heart, MessageCircle, BarChart3, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
 import { timeAgo } from './StoryShared';
+import { CrewPill } from './CrewKit';
 import { SponsoredCard } from './AdsTab';
 import SendToChatSheet from './VideoShareExtras';
-import { PC as C, PostMeta, OfficialPill, BurnPill, PollCard, FeelPanel, MoodPanel, PlacePanel, TagPanel, SongPanel, QaPanel, PollPanel, BurnPanel, PhotoAnnotator, fmtBurn } from './PostExtras';
+import { PC as C, VIBE_COLORS, META_COLORS, colorPill, PostMeta, OfficialPill, BurnPill, PollCard, FeelPanel, MoodPanel, PlacePanel, TagPanel, SongPanel, QaPanel, PollPanel, BurnPanel, PhotoAnnotator, fmtBurn } from './PostExtras';
 
-const VIBES = [['authentic', '❤️ Authentic'], ['pro', '💼 Pro'], ['creative', '🎨 Creative'], ['intimate', '🌸 Intimate'], ['anon', '👤 Anon']];
+const VIBES = [['authentic', '❤️ Authentic'], ['pro', '💼 Pro'], ['creative', '🎨 Creative'], ['intimate', '🌸 Intimate'], ['anon', '👻 Anon']];
 const AUDIENCE = [['everyone', '🌍 Everyone'], ['followers', '👥 Followers'], ['me', '🔒 Only Me']];
 
-const Chip = ({ on, children, onClick }) => (
-  <button onClick={onClick} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 999, border: on ? '1.5px solid #fff' : `1px solid ${C.border}`, background: on ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.06)', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{children}</button>
+const Chip = ({ on, children, onClick, color }) => (
+  <button onClick={onClick} style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 999, border: on ? '1.5px solid #fff' : `1px solid ${color ? color + '88' : C.border}`, background: on ? (color ? `linear-gradient(135deg,${color},${color}bb)` : 'linear-gradient(135deg,#8b2cf5,#ff2d95)') : (color ? color + '22' : 'rgba(255,255,255,.06)'), color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>{children}</button>
 );
 
 function Avatar({ url, name, mediaHref, size = 40 }) {
@@ -32,12 +33,13 @@ function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToas
         <Avatar url={p.avatarUrl} name={p.authorName} mediaHref={mediaHref} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{p.authorDisplayName || p.authorName}</span>
+            <span style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{p.burned ? 'Burned identity' : (p.authorDisplayName || p.authorName)}</span>
+            {p.authorId && p.crew && <CrewPill position={p.crew} size={14} />}
             {p.authorId && renderBadges?.(p)}
             {p.expiresAt && <BurnPill expiresAt={p.expiresAt} onGone={onGone} />}
           </div>
           {p.authorOfficial && <div style={{ margin: '3px 0 1px' }}><OfficialPill label={p.authorOfficial === true ? 'OFFICIAL' : p.authorOfficial} /></div>}
-          <div style={{ color: C.gray, fontSize: 11.5, marginTop: 1 }}>{timeAgo(p.createdAt)} · {vibeLabel}{p.visibility !== 'everyone' ? ` · ${p.visibility === 'me' ? 'Only me' : 'Followers'}` : ''}</div>
+          <div style={{ color: C.gray, fontSize: 11.5, marginTop: 3, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>{timeAgo(p.createdAt)}<span style={colorPill(VIBE_COLORS[p.vibe] || VIBE_COLORS.authentic, { fontSize: 11, padding: '1px 9px' })}>{vibeLabel}</span>{p.visibility !== 'everyone' ? ` · ${p.visibility === 'me' ? 'Only me' : 'Followers'}` : ''}</div>
         </div>
         <div style={{ position: 'relative' }}>
           <button onClick={() => setMenu(v => !v)} aria-label="More" style={{ background: 'none', border: 'none', color: C.gray, padding: 4, cursor: 'pointer' }}><MoreVertical size={20} /></button>
@@ -51,6 +53,7 @@ function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToas
         </div>
       </div>
       <PostMeta p={p} />
+      {p.burned && <div style={{ display: 'flex', justifyContent: 'center', padding: '26px 0 22px' }}><span style={{ background: 'linear-gradient(90deg,#ff5a1f,#ff2d2d)', color: '#fff', fontSize: 15, fontWeight: 900, letterSpacing: 1.4, padding: '8px 22px', borderRadius: 999, boxShadow: '0 0 18px rgba(255,80,30,.5)' }}>🔥 DEFCON 1</span></div>}
       {p.text && <p style={{ color: 'white', fontSize: 15, lineHeight: 1.5, margin: '0 0 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{p.text}</p>}
       {p.repost && (p.repost.gone
         ? <div style={{ border: `1px dashed ${C.border}`, borderRadius: 14, padding: 12, margin: '0 0 10px', color: C.gray, fontSize: 13 }}>🔁 The original post is no longer available</div>
@@ -75,7 +78,7 @@ function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToas
         <button onClick={() => onLike(p)} style={{ ...icon, color: p.likedByMe ? C.pink : C.gray }}><Heart size={19} fill={p.likedByMe ? C.pink : 'none'} /> {p.likeCount}</button>
         <button onClick={() => onOpenComments(p)} style={icon}><MessageCircle size={19} /> {p.commentCount}</button>
         <button onClick={() => onShare(p)} style={icon}><Share2 size={18} /> {p.shareCount || 0}</button>
-        <span style={{ marginLeft: 'auto', color: C.gray, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 700 }}><Eye size={18} /> {p.viewCount || 0}</span>
+        <span style={{ marginLeft: 'auto', color: C.gray, display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, fontWeight: 700 }}><BarChart3 size={18} /> {p.viewCount || 0}</span>
       </div>
     </div>
   );
@@ -210,7 +213,7 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
     <div style={{ position: 'fixed', inset: 0, zIndex: 560, background: C.dark, display: 'flex', flexDirection: 'column' }}>
       {viewImg && (
         <div onClick={() => setViewImg(null)} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <button onClick={() => setViewImg(null)} aria-label="Close" style={{ position: 'absolute', top: 'calc(env(safe-area-inset-top,0px) + 14px)', right: 14, background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} style={{ color: 'white' }} /></button>
+          <button onClick={() => setViewImg(null)} aria-label="Close" style={{ position: 'absolute', top: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 14px)', right: 14, background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} style={{ color: 'white' }} /></button>
           <img src={viewImg} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
         </div>
       )}
@@ -232,14 +235,14 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
         message={`📝 ${sendFor.authorName ? '@' + sendFor.authorName + ' on Snapsa' : 'A Snapsa post'}${sendFor.text ? ':\n“' + sendFor.text.slice(0, 280) + '”' : ''}`}
         sharedPath={`/snapsa/posts/${sendFor._id}/share`}
         onClose={(n) => { if (n) setPosts(l => (l || []).map(x => x._id === sendFor._id ? { ...x, shareCount: (x.shareCount || 0) + n } : x)); setSendFor(null); setShareFor(null); }} />}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(env(safe-area-inset-top,0px) + 12px) 14px 10px', background: '#000', borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 12px) 14px 10px', background: '#000', borderBottom: `1px solid ${C.border}` }}>
         <button onClick={onClose} aria-label="Back" style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer' }}><ArrowLeft size={22} style={{ color: 'white' }} /></button>
         <h2 style={{ margin: 0, color: 'white', fontSize: 19, fontWeight: 800, flex: 1 }}>Snapsa Posts</h2>
       </div>
       <div style={{ display: 'flex', gap: 8, padding: '10px 14px 4px' }}>
-        <Chip on={tab === 'read'} onClick={() => setTab('read')}>📖 Read</Chip>
-        <Chip on={tab === 'write'} onClick={() => setTab('write')}>✍️ Write</Chip>
-        {tab === 'read' && <Chip on={mine} onClick={() => setMine(m => !m)}>My posts</Chip>}
+        <Chip on={tab === 'read' && !mine} onClick={() => { setTab('read'); setMine(false); }}>Feed</Chip>
+        <Chip on={tab === 'write'} onClick={() => setTab('write')}>Create Post</Chip>
+        <Chip on={tab === 'read' && mine} onClick={() => { setTab('read'); setMine(true); }}>My Post</Chip>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto', padding: '10px 14px 110px' }}>
@@ -252,12 +255,12 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
             </React.Fragment>)}</div>
         ) : (
           <div>
-            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>{VIBES.map(([id, l]) => <Chip key={id} on={vibe === id} onClick={() => setVibe(id)}>{l}</Chip>)}</div>
+            <div style={{ display: 'flex', gap: 8, overflowX: 'auto', scrollbarWidth: 'none' }}>{VIBES.map(([id, l]) => <Chip key={id} color={VIBE_COLORS[id]} on={vibe === id} onClick={() => setVibe(id)}>{l}</Chip>)}</div>
 
             {/* who is posting: avatar + name + verification badge (anon hides all of it) */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '16px 0 10px' }}>
               {vibe === 'anon'
-                ? <div style={{ width: 46, height: 46, borderRadius: '50%', background: 'rgba(255,255,255,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>👤</div>
+                ? <div style={{ width: 46, height: 46, borderRadius: '50%', background: 'rgba(255,255,255,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24 }}>👻</div>
                 : <Avatar url={ownAvatar} name={ownName || currentUser?.firstName} mediaHref={mediaHref} size={46} />}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <span style={{ color: '#e879f9', fontWeight: 800, fontSize: 18, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{vibe === 'anon' ? 'Anonymous' : (ownName || currentUser?.firstName || 'You')}</span>
@@ -274,7 +277,7 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 8px' }}>
                 {[feeling && ['feel', `feeling ${feeling}`, () => setFeeling('')], moodLevel && ['mood', `mood: ${moodLevel}`, () => setMoodLevel('')], place.trim() && ['place', `in ${place.trim()}`, () => setPlace('')],
                   tags.length > 0 && ['tag', `with ${tags.map(t => '@' + t).join(', ')}`, () => setTags([])], song && ['song', `🎵 ${song.title}`, () => setSong(null)], burnMs > 0 && ['burn', `🔥 burns in ${fmtBurn(burnMs)}`, () => setBurnMs(0)]].filter(Boolean).map(([k, l, x]) => (
-                  <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(180,76,255,.18)', border: `1px solid ${C.border}`, borderRadius: 999, padding: '4px 10px', color: 'white', fontSize: 12.5, fontWeight: 700 }}>{l}<button onClick={x} aria-label="Remove" style={{ background: 'none', border: 'none', color: 'white', padding: 0, lineHeight: 1 }}>×</button></span>))}
+                  <span key={k} style={(() => { const col = k === 'feel' ? META_COLORS.feel : k === 'place' ? META_COLORS.place : k === 'tag' ? META_COLORS.tag : k === 'mood' ? (META_COLORS[moodLevel] || META_COLORS.mood) : k === 'burn' ? '#fb923c' : '#6ee7b7'; return colorPill(col, { gap: 6, padding: '4px 10px', fontSize: 12.5 }); })()}>{l}<button onClick={x} aria-label="Remove" style={{ background: 'none', border: 'none', color: 'white', padding: 0, lineHeight: 1 }}>×</button></span>))}
               </div>
             )}
 
@@ -309,20 +312,20 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
         )}
       </div>
       {annotating && preview && <PhotoAnnotator src={preview} onCancel={() => setAnnotating(false)} onDone={(f) => { setFile(f); setPreview(URL.createObjectURL(f)); setAnnotating(false); }} />}
-      {open && <Comments post={open} snapFetch={snapFetch} showToast={showToast} onClose={() => { setPosts(l => l.map(x => x._id === open._id ? { ...x, commentCount: open._cc ?? x.commentCount } : x)); setOpen(null); }} onCount={n => { open._cc = n; }} />}
+      {open && <Comments post={open} mediaHref={mediaHref} snapFetch={snapFetch} showToast={showToast} onClose={() => { setPosts(l => l.map(x => x._id === open._id ? { ...x, commentCount: open._cc ?? x.commentCount } : x)); setOpen(null); }} onCount={n => { open._cc = n; }} />}
     </div>
   );
 }
 
-function Comments({ post, snapFetch, showToast, onClose, onCount }) {
+function Comments({ post, mediaHref, snapFetch, showToast, onClose, onCount }) {
   const [list, setList] = useState(null);
   const [t, setT] = useState('');
-  const [anon, setAnon] = useState(false);
+  const [mode, setMode] = useState('normal');   // normal | anon | direct (only the post's author can read a direct comment)
   useEffect(() => { snapFetch(`/snapsa/posts/${post._id}/comments`).then(r => r.ok ? r.json() : null).then(d => { setList(d?.comments || []); onCount(d?.comments?.length || 0); }).catch(() => setList([])); }, [post._id]);
   const send = async () => {
     const text = t.trim(); if (!text) return;
     setT('');
-    const r = await snapFetch(`/snapsa/posts/${post._id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, anon }) }).catch(() => null);
+    const r = await snapFetch(`/snapsa/posts/${post._id}/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, anon: mode === 'anon', direct: mode === 'direct' }) }).catch(() => null);
     if (r?.ok) { const d = await r.json(); setList(l => { const n = [...(l || []), d.comment]; onCount(n.length); return n; }); } else showToast?.('Could not comment', 'error');
   };
   return (
@@ -331,12 +334,31 @@ function Comments({ post, snapFetch, showToast, onClose, onCount }) {
         <div style={{ padding: '14px 16px', color: 'white', fontWeight: 800, display: 'flex', justifyContent: 'space-between' }}>{post.qa ? 'Answers' : 'Comments'} <button onClick={onClose} style={{ background: 'none', border: 'none', color: 'white' }}><X size={18} /></button></div>
         {post.qa && <div style={{ margin: '0 16px 8px', padding: '9px 12px', borderRadius: 12, background: 'rgba(244,114,182,.1)', border: '1px solid rgba(244,114,182,.4)', color: 'white', fontWeight: 700 }}>❓ {post.qa}</div>}
         <div style={{ overflowY: 'auto', padding: '0 16px', flex: 1 }}>
-          {list === null ? <p style={{ color: C.gray }}>Loading…</p> : list.length === 0 ? <p style={{ color: C.gray }}>{post.qa ? 'No answers yet.' : 'No comments yet.'}</p> : list.map((c, i) => (
-            <p key={i} style={{ color: 'white', fontSize: 14, margin: '0 0 10px' }}><strong style={{ color: C.pink }}>{c.authorDisplayName || c.authorName}</strong> {c.text}</p>))}
+          {list === null ? <p style={{ color: C.gray }}>Loading…</p> : list.length === 0 ? <p style={{ color: C.gray }}>{post.qa ? 'No answers yet.' : 'No comments yet.'}</p> : list.map((c, i) => c.hidden ? (
+            <p key={i} style={{ color: C.gray, fontSize: 13, margin: '0 0 10px', fontStyle: 'italic' }}>🔒 Direct comment</p>
+          ) : (
+            <div key={i} style={{ display: 'flex', gap: 10, margin: '0 0 14px', alignItems: 'flex-start' }}>
+              {c.anon ? <div style={{ width: 34, height: 34, borderRadius: '50%', background: 'rgba(255,255,255,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17, flexShrink: 0 }}>👻</div>
+                : <Avatar url={c.avatarUrl} name={c.authorDisplayName || c.authorName} mediaHref={mediaHref} size={34} />}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                  <strong style={{ color: C.pink, fontSize: 13.5 }}>{c.anon ? 'Anonymous' : (c.authorDisplayName || c.authorName)}</strong>
+                  {!c.anon && c.crew && <CrewPill position={c.crew} size={12} />}
+                  {c.direct && <span style={{ ...colorPill('#38bdf8', { fontSize: 10.5, padding: '0 8px' }) }}>Direct</span>}
+                </div>
+                {!c.anon && c.official && <div style={{ margin: '2px 0' }}><OfficialPill label={c.official === true ? 'OFFICIAL' : c.official} /></div>}
+                <div style={{ color: 'white', fontSize: 14, margin: '2px 0', wordBreak: 'break-word' }}>{c.text}</div>
+                <div style={{ color: C.gray, fontSize: 11 }}>{timeAgo(c.createdAt)} · {new Date(c.createdAt).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+              </div>
+            </div>))}
         </div>
+        <div style={{ display: 'flex', gap: 6, padding: '8px 14px 0' }}>
+          {[['normal', 'Comment'], ['anon', '👻 Anon'], ['direct', '🔒 Direct']].map(([id, l]) => (
+            <button key={id} onClick={() => setMode(id)} style={{ padding: '6px 12px', borderRadius: 999, border: mode === id ? '1.5px solid #fff' : `1px solid ${C.border}`, background: mode === id ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.06)', color: 'white', fontSize: 12, fontWeight: 700 }}>{l}</button>))}
+        </div>
+        {mode === 'direct' && <div style={{ padding: '4px 16px 0', color: C.gray, fontSize: 11.5 }}>Only the author of this post can read a direct comment. Everyone else just sees that one exists.</div>}
         <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom,0px))', alignItems: 'center' }}>
-          <button onClick={() => setAnon(a => !a)} title="Comment as" style={{ flexShrink: 0, padding: '8px 10px', borderRadius: 999, border: anon ? '1.5px solid #fff' : `1px solid ${C.border}`, background: anon ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.06)', color: 'white', fontSize: 12, fontWeight: 700 }}>{anon ? '👤 Anon' : '🙂 Me'}</button>
-          <input value={t} onChange={e => setT(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder={post.qa ? 'Write your answer…' : 'Add a comment…'} style={{ flex: 1, background: 'rgba(255,255,255,.08)', border: `1px solid ${C.border}`, borderRadius: 999, padding: '10px 14px', color: 'white', outline: 'none' }} />
+          <input value={t} onChange={e => setT(e.target.value)} onKeyDown={e => e.key === 'Enter' && send()} placeholder={post.qa ? 'Write your answer…' : mode === 'direct' ? 'Write a direct comment…' : mode === 'anon' ? 'Comment as Anonymous…' : 'Add a comment…'} style={{ flex: 1, background: 'rgba(255,255,255,.08)', border: `1px solid ${C.border}`, borderRadius: 999, padding: '10px 14px', color: 'white', outline: 'none' }} />
           <button onClick={send} style={{ border: 'none', borderRadius: '50%', width: 42, height: 42, background: 'linear-gradient(135deg,#8b2cf5,#ff2d95)', color: 'white' }}><Send size={16} /></button>
         </div>
       </div>

@@ -152,7 +152,7 @@ export function BurnBubble({ m, isOwn, snapFetch, mediaHref, showToast, onChange
   const viewer = content ? createPortal(
     <div onClick={stop} onMouseDown={stop} onTouchStart={stop} onTouchEnd={stop} onContextMenu={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,.96)', display: 'flex', flexDirection: 'column', userSelect: 'none', WebkitUserSelect: 'none' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(env(safe-area-inset-top,0px) + 14px) 16px 10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 14px) 16px 10px' }}>
         <span style={{ color: '#fbbf24', fontWeight: 800 }}>🔥 Burns when you close this</span>
         <button onClick={close} aria-label="Close" style={{ background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: '50%', padding: 10 }}><X size={20} style={{ color: 'white' }} /></button>
       </div>

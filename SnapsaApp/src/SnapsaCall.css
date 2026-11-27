@@ -51,8 +51,8 @@
 /* Expanded: video fills the screen, controls stay on top */
 .snapsa-video.expanded .sv-remote { left: 0; top: 0; width: 100%; height: 100%; border-radius: 0; z-index: 2; position: fixed; }
 .snapsa-video.expanded .sv-frame, .snapsa-video.expanded .sv-name { opacity: 0; }
-.snapsa-video.expanded .sv-local { position: fixed; left: auto; right: 14px; top: calc(env(safe-area-inset-top,0px) + 14px); width: 92px; height: 130px; z-index: 6; border: 2px solid rgba(255,255,255,.4); border-radius: 14px; }
-.snapsa-video.expanded .sv-timer { z-index: 7; top: calc(env(safe-area-inset-top,0px) + 14px); left: 14px; width: auto; padding: 4px 12px; background: rgba(0,0,0,.5); border-radius: 20px; height: auto; }
+.snapsa-video.expanded .sv-local { position: fixed; left: auto; right: 14px; top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14px); width: 92px; height: 130px; z-index: 6; border: 2px solid rgba(255,255,255,.4); border-radius: 14px; }
+.snapsa-video.expanded .sv-timer { z-index: 7; top: calc(var(--sat, env(safe-area-inset-top, 0px)) + 14px); left: 14px; width: auto; padding: 4px 12px; background: rgba(0,0,0,.5); border-radius: 20px; height: auto; }
 .snapsa-video.expanded .sv-btn { z-index: 8; background: rgba(15,5,30,.65); border-radius: 50%; position: fixed; top: auto; bottom: 34px; }
 .snapsa-video.expanded .sv-btn small { display: none; }
 @media (max-width: 380px) { .voice-button svg { width: 58px; height: 58px; padding: 17px; } }

@@ -2,6 +2,8 @@
 // Needs in /public:  SnapsaCallBg.jpg (galaxy + logo background)  and  SnapsaVideoFrame.png (neon frame with a see-through window)
 import React, { useEffect, useRef, useState } from 'react';
 import './SnapsaCall.css';
+import callBgUrl from './assets/SnapsaCallBg.jpg';
+import videoFrameUrl from './assets/SnapsaVideoFrame.png';
 
 const MicIcon = ({ off }) => (
   <svg viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8" />{off && <path d="M3 3l18 18" />}</svg>
@@ -28,7 +30,7 @@ function Avatar({ avatar, name }) {
 }
 
 /* ─────────── VOICE CALL (also used while a video call is ringing) ─────────── */
-export function SnapsaVoiceCall({ background = '/SnapsaCallBg.jpg', avatar, name, status = 'Calling…', duration = '00:00', connected = false, incoming = false, muted, speaker, onMute, onSpeaker, onEndCall, onAnswer, onDecline, ended = false }) {
+export function SnapsaVoiceCall({ background = callBgUrl, avatar, name, status = 'Calling…', duration = '00:00', connected = false, incoming = false, muted, speaker, onMute, onSpeaker, onEndCall, onAnswer, onDecline, ended = false }) {
   return (
     <div className="snapsa-voice" style={{ backgroundImage: `url(${background})` }}>
       <div className="voice-shade" />
@@ -72,7 +74,7 @@ export function SnapsaVideoCall({ name, remoteStream, localStream, duration = '0
   useEffect(() => { if (remoteRef.current) remoteRef.current.volume = speaker ? 1 : 0.45; }, [speaker]);
 
   return (
-    <div className={`snapsa-video ${expanded ? 'expanded' : ''}`}>
+    <div className={`snapsa-video ${expanded ? 'expanded' : ''}`} style={{ backgroundImage: `url(${callBgUrl})` }}>
       <div className="sv-stage">
         <div className="sv-remote">
           <video ref={remoteRef} autoPlay playsInline />
@@ -82,7 +84,7 @@ export function SnapsaVideoCall({ name, remoteStream, localStream, duration = '0
           <video ref={localRef} autoPlay playsInline muted />
           {cameraOff && <div className="sv-camoff">Camera off</div>}
         </div>
-        <img className="sv-frame" src="/SnapsaVideoFrame.png" alt="" draggable={false} />
+        <img className="sv-frame" src={videoFrameUrl} alt="" draggable={false} />
         <div className="sv-name">{name}</div>
         <div className="sv-timer">{duration}</div>
         <button className="sv-btn" style={{ left: '12.2%' }} onClick={onMute} aria-label="Mute"><MicIcon off={muted} /><small>{muted ? 'Unmute' : 'Mute'}</small></button>

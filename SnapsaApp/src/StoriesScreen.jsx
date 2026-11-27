@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Plus, Flame, Eye } from 'lucide-react';
 import StoryCreator from './StoryCreator';
 import { timeAgo } from './StoryShared';
+import { OfficialPill } from './PostExtras';
 
 const C = { pink: '#FF2D95', dark: '#07030F', card: '#150B28', border: 'rgba(180,76,255,0.30)', gray: '#A59BC4' };
 
@@ -62,6 +63,7 @@ export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast
         </StoryRing>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontWeight: 800, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.authorDisplayName || g.authorName}</span>{renderBadge?.(g)}</div>
+          {g.official && <div style={{ marginTop: 3 }}><OfficialPill label={g.official === true ? 'OFFICIAL' : g.official} /></div>}
           <div style={{ color: C.gray, fontSize: 12, marginTop: 2 }}>{g.stories.length} {g.stories.length === 1 ? 'story' : 'stories'} · {last.createdAt ? timeAgo(last.createdAt) : ''}</div>
         </div>
       </button>
@@ -71,7 +73,7 @@ export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 560, background: C.dark, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(env(safe-area-inset-top,0px) + 12px) 14px 12px', background: '#000', borderBottom: `1px solid ${C.border}` }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 12px) 14px 12px', background: '#000', borderBottom: `1px solid ${C.border}` }}>
         <button onClick={onClose} aria-label="Back" style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer' }}><ArrowLeft size={22} style={{ color: 'white' }} /></button>
         <h2 style={{ margin: 0, color: 'white', fontSize: 19, fontWeight: 800, flex: 1 }}>Stories</h2>
       </div>

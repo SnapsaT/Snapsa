@@ -20,7 +20,7 @@ export const CrewPill = ({ position, size = 13 }) => {
           background: 'linear-gradient(135deg,#ff9a1f 0%,#ff4d00 55%,#d61a00 100%)', color: '#fff', fontWeight: 900, fontSize: Math.max(6, Math.round(h * 0.6)), letterSpacing: 0.6,
           boxShadow: '0 0 6px rgba(255,90,0,0.75), inset 0 0 3px rgba(255,220,120,0.6)', textShadow: '0 1px 1px rgba(120,20,0,0.7)', lineHeight: 1 }}>CREW</span>
       {show && typeof document !== 'undefined' && createPortal(
-        <div onClick={() => setShow(false)} style={{ position: 'fixed', left: 0, right: 0, top: 'calc(env(safe-area-inset-top,0px) + 90px)', display: 'flex', justifyContent: 'center', zIndex: 99999, pointerEvents: 'auto' }}>
+        <div onClick={() => setShow(false)} style={{ position: 'fixed', left: 0, right: 0, top: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 90px)', display: 'flex', justifyContent: 'center', zIndex: 99999, pointerEvents: 'auto' }}>
           <div style={{ background: 'linear-gradient(135deg,#ff7a1a,#d61a00)', color: '#fff', padding: '9px 16px', borderRadius: 999, fontWeight: 800, fontSize: 13.5, boxShadow: '0 6px 24px rgba(255,80,0,0.5)', maxWidth: '88vw', textAlign: 'center' }}>
             {(position || 'Crew member')} at Snapsa
           </div>

@@ -23,14 +23,18 @@ export const fmtBurn = (ms) => {
 };
 
 /* ───── words under the name: "feeling happy · in Stellenbosch · with @thabo · mood Peak" ───── */
+// Each kind of post detail has its own colour (feeling / place / mood level / tags / vibe)
+export const META_COLORS = { feel: '#fbbf24', place: '#34d399', tag: '#e879f9', Peak: '#f59e0b', Calm: '#38bdf8', Focused: '#a78bfa', Hyped: '#f43f5e', Low: '#94a3b8', mood: '#60a5fa' };
+export const VIBE_COLORS = { authentic: '#fb7185', pro: '#60a5fa', creative: '#fbbf24', intimate: '#e879f9', anon: '#94a3b8' };
+export const colorPill = (col, extra) => ({ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 10px', borderRadius: 999, border: `1px solid ${col}77`, background: `${col}22`, color: col, fontSize: 12, fontWeight: 800, ...extra });
 export function PostMeta({ p }) {
   const bits = [];
-  if (p.feeling) bits.push(<span key="f">is feeling <b>{p.feeling}</b></span>);
-  if (p.place) bits.push(<span key="p">in <b>{p.place}</b></span>);
-  if (p.tags?.length) bits.push(<span key="t">with {p.tags.map((t, i) => <b key={t.userId || i}>{i ? ', ' : ''}@{t.username}</b>)}</span>);
-  if (p.moodLevel) bits.push(<span key="m">mood: <b>{p.moodLevel}</b></span>);
+  if (p.feeling) bits.push(<span key="f" style={colorPill(META_COLORS.feel)}>feeling {p.feeling}</span>);
+  if (p.place) bits.push(<span key="p" style={colorPill(META_COLORS.place)}>in {p.place}</span>);
+  if (p.tags?.length) bits.push(<span key="t" style={colorPill(META_COLORS.tag)}>with {p.tags.map(t => '@' + t.username).join(', ')}</span>);
+  if (p.moodLevel) bits.push(<span key="m" style={colorPill(META_COLORS[p.moodLevel] || META_COLORS.mood)}>mood: {p.moodLevel}</span>);
   if (!bits.length) return null;
-  return <div style={{ color: PC.gray, fontSize: 12.5, lineHeight: 1.5, margin: '2px 0 8px' }}>{bits.map((b, i) => <React.Fragment key={i}>{i ? ' · ' : ''}{b}</React.Fragment>)}</div>;
+  return <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, margin: '4px 0 8px' }}>{bits}</div>;
 }
 
 export function OfficialPill({ label = 'OFFICIAL' }) {
@@ -206,7 +210,7 @@ export function PhotoAnnotator({ src, onDone, onCancel }) {
   const btn = { padding: '9px 14px', borderRadius: 12, border: `1px solid ${PC.border}`, background: 'rgba(255,255,255,.08)', color: 'white', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: 6 };
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 900, background: '#000', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(env(safe-area-inset-top,0px) + 12px) 14px 10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 12px) 14px 10px' }}>
         <button onClick={onCancel} style={{ ...btn, border: 'none' }}><X size={18} /> Cancel</button>
         <span style={{ color: 'white', fontWeight: 800 }}>Annotate</span>
         <button onClick={done} style={{ ...btn, border: 'none', background: 'linear-gradient(135deg,#8b2cf5,#ff2d95)' }}><Check size={18} /> Done</button>

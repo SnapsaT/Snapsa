@@ -154,7 +154,7 @@ export default function StoryCreator({ onClose, showToast, snapFetch }) {
     <div style={{ position: 'fixed', inset: 0, zIndex: 650, background: C.dark, display: 'flex', flexDirection: 'column' }}>
       <style>{`@keyframes scSpin{to{transform:rotate(360deg)}} @keyframes scPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}`}</style>
       {/* header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'calc(env(safe-area-inset-top,0px) + 14px) 16px 10px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 14px) 16px 10px' }}>
         <h2 style={{ margin: 0, color: 'white', fontSize: 20, fontWeight: 800 }}>Create Story</h2>
         <button onClick={onClose} disabled={posting} aria-label="Close" style={{ background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: '50%', padding: 8, opacity: posting ? 0.5 : 1 }}><X size={18} style={{ color: 'white' }} /></button>
       </div>

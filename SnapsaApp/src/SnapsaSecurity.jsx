@@ -61,7 +61,15 @@ export default function SnapsaSecurity({ onClose, snapFetch, showToast }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 560, background: C.dark, display: 'flex', flexDirection: 'column' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(env(safe-area-inset-top,0px) + 12px) 14px 12px', background: 'linear-gradient(90deg,#020617,#172554,#3b0764)', borderBottom: `1px solid ${C.border}` }}>
+      {busy === 1 && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(5,2,10,.96)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 24, textAlign: 'center' }}>
+          <div style={{ fontSize: 64, animation: 'snapsaBurnPulse 1s ease-in-out infinite alternate' }}>🔥</div>
+          <div style={{ color: '#fff', fontSize: 20, fontWeight: 800 }}>Burning your data…</div>
+          <div style={{ color: 'rgba(255,255,255,.7)', fontSize: 13, maxWidth: 280 }}>Videos, posts, stories and chats are being deleted. Keep the app open until this finishes.</div>
+          <style>{'@keyframes snapsaBurnPulse{from{transform:scale(.9);opacity:.7}to{transform:scale(1.15);opacity:1}}'}</style>
+        </div>
+      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 12px) 14px 12px', background: 'linear-gradient(90deg,#020617,#172554,#3b0764)', borderBottom: `1px solid ${C.border}` }}>
         <button onClick={onClose} aria-label="Back" style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer' }}><ArrowLeft size={22} style={{ color: 'white' }} /></button>
         <div style={{ flex: 1 }}>
           <h2 style={{ margin: 0, color: 'white', fontSize: 19, fontWeight: 800 }}>DEFCON</h2>
