@@ -4721,9 +4721,9 @@ app.get('/snapsa/posts/:id/comments', snapAuth, async (req, res) => {
     if (!p) return res.status(404).json({ error: 'Post not found' });
     const isAuthor = String(p.authorId) === String(req.userId);
     const cl = (p.comments || []).slice(-100);
-    const cprofs = await SnapsaProfile.find({ userId: { $in: [...new Set(cl.filter(c => !c.anon).map(c => String(c.userId)))] } }, 'userId displayName').lean();
-    const dnMap = {}; cprofs.forEach(x => { dnMap[String(x.userId)] = x.displayName || ''; });
-    res.json({ comments: cl.map(c => (c.direct && !isAuthor && String(c.userId) !== String(req.userId)) ? { _id: c._id, direct: true, hidden: true, authorName: '', text: '', createdAt: c.createdAt, mine: false } : c.anon ? { _id: c._id, authorName: 'Anonymous', anon: true, direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) } : { _id: c._id, userId: c.userId, authorName: c.authorName, authorDisplayName: dnMap[String(c.userId)] || '', direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) }) });
+    const cprofs = await SnapsaProfile.find({ userId: { $in: [...new Set(cl.filter(c => !c.anon).map(c => String(c.userId)))] } }, 'userId displayName avatarUrl').lean();
+    const dnMap = {}, avMap = {}; cprofs.forEach(x => { dnMap[String(x.userId)] = x.displayName || ''; avMap[String(x.userId)] = x.avatarUrl || null; });
+    res.json({ comments: cl.map(c => (c.direct && !isAuthor && String(c.userId) !== String(req.userId)) ? { _id: c._id, direct: true, hidden: true, authorName: '', text: '', createdAt: c.createdAt, mine: false } : c.anon ? { _id: c._id, authorName: 'Anonymous', anon: true, direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) } : { _id: c._id, userId: c.userId, authorName: c.authorName, authorDisplayName: dnMap[String(c.userId)] || '', avatarUrl: avMap[String(c.userId)] || null, direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4738,7 +4738,7 @@ app.post('/snapsa/posts/:id/comments', snapAuth, async (req, res) => {
     const c = { userId: req.userId, authorName: anon ? 'Anonymous' : (profile?.username || 'unknown'), anon, direct, text, createdAt: new Date() };
     const r = await SnapsaPost.updateOne({ _id: req.params.id, 'comments.199': { $exists: false } }, { $push: { comments: c } });
     if (!r.matchedCount) return res.status(400).json({ error: 'Comments are closed on this post' });
-    res.json({ success: true, comment: { authorName: c.authorName, anon, direct, text, createdAt: c.createdAt, mine: true } });
+    res.json({ success: true, comment: { userId: anon ? undefined : req.userId, authorName: c.authorName, authorDisplayName: anon ? '' : (profile?.displayName || ''), avatarUrl: anon ? null : (profile?.avatarUrl || null), anon, direct, text, createdAt: c.createdAt, mine: true } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -9061,9 +9061,23 @@ async function getCloudflareIce() {
   } catch (e) { console.error('[turn] cloudflare', e.message); }
   return _cfIce;
 }
+// Metered.ca (free 20 GB/month, no server needed): set METERED_APP (the name before .metered.live) and METERED_API_KEY
+let _mtIce = null, _mtIceAt = 0;
+async function getMeteredIce() {
+  if (!process.env.METERED_APP || !process.env.METERED_API_KEY) return null;
+  if (_mtIce && Date.now() - _mtIceAt < 3600 * 1000) return _mtIce;
+  try {
+    const r = await fetch(`https://${encodeURIComponent(process.env.METERED_APP)}.metered.live/api/v1/turn/credentials?apiKey=${encodeURIComponent(process.env.METERED_API_KEY)}`);
+    if (!r.ok) { console.error('[turn] metered', r.status); return _mtIce; }
+    const d = await r.json();
+    const list = Array.isArray(d) ? d : (Array.isArray(d.iceServers) ? d.iceServers : []);
+    if (list.length) { _mtIce = list; _mtIceAt = Date.now(); }
+  } catch (e) { console.error('[turn] metered', e.message); }
+  return _mtIce;
+}
 app.get('/snapsa/call/ice', snapAuth, async (req, res) => {
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-  const cf = await getCloudflareIce();
+  const cf = (await getCloudflareIce()) || (await getMeteredIce());
   if (cf?.length) iceServers.push(...cf);
   else if (process.env.TURN_URL) {
     iceServers.push({ urls: process.env.TURN_URL.split(',').map(s => s.trim()).filter(Boolean), username: process.env.TURN_USERNAME || '', credential: process.env.TURN_CREDENTIAL || '' });
