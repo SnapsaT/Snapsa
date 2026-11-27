@@ -1,7 +1,7 @@
 // src/PostsScreen.jsx — opened by the "posts" button on the feed: read other people's posts and write your own.
 // Composer = the WernPost composer: modes, Media/Camera/Annotate, Tag, Place, Feel, Mood, Song, Poll, Q&A and timed Burn.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Heart, MessageCircle, BarChart3, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
+import { ArrowLeft, Heart, MessageCircle, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
 import { timeAgo } from './StoryShared';
 import { CrewPill } from './CrewKit';
 import { SponsoredCard } from './AdsTab';
