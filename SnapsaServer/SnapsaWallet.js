@@ -533,7 +533,45 @@ export function registerSnapsaWallet(app, deps) {
     }
   };
 
+  // The wallet's currency follows the account's country (detected from the IP). If they differ (for example a wallet
+  // that was opened in BWP for a South African account) the balance is converted once, with a visible ledger entry,
+  // at the rate from displayRates (override with SNAPSA_DISPLAY_RATES). Skipped while a withdrawal is pending.
+  async function reconcileCurrency(userId) {
+    try {
+      const { SnapsaProfile } = getCoinDeps();
+      const [w0, prof] = await Promise.all([SnapsaWallet.findOne({ userId }).lean(), SnapsaProfile.findOne({ userId }).select('countryCode').lean()]);
+      if (!w0 || !prof || w0.status === 'closed') return;
+      const target = WALLET_CC[String(prof.countryCode || '').toUpperCase()];
+      if (!target || target === w0.currency) return;
+      const from = w0.currency;
+      const rate = displayRates(from)[target];
+      if (!rate || !Number.isFinite(rate)) return;
+      await inTransaction(async (session) => {
+        await lockWallets(session, w0._id);
+        const w = await SnapsaWallet.findById(w0._id).session(session);
+        if (!w || w.currency !== from) return;
+        const bal = await balanceOf(w._id, session);
+        if (bal.pendingMinor !== 0) return;             // wait until the pending withdrawal has finished
+        const newMinor = Math.round(bal.postedMinor * rate);
+        const delta = newMinor - bal.postedMinor;
+        if (delta !== 0) {
+          await SnapsaWalletEntry.create([{
+            txId: `fx_${w._id}_${Date.now()}`, walletId: w._id, amountMinor: delta, kind: 'adjustment', status: 'posted',
+            description: `Currency changed from ${from} to ${target} (rate ${rate})`,
+          }], { session });
+        }
+        const scale = (x) => Math.round((x || 0) * rate);
+        await SnapsaWallet.updateOne({ _id: w._id }, { $set: {
+          currency: target,
+          displayCurrency: (!w.displayCurrency || w.displayCurrency === from) ? null : w.displayCurrency,
+          dailyPurchaseLimitMinor: scale(w.dailyPurchaseLimitMinor), dailyAtmLimitMinor: scale(w.dailyAtmLimitMinor), dailyTransferLimitMinor: scale(w.dailyTransferLimitMinor),
+        } }, { session });
+      });
+    } catch (e) { console.error('[wallet] currency reconcile failed:', e.message); }
+  }
+
   async function walletView(userId) {
+    await reconcileCurrency(userId);
     const appDoc = await SnapsaWalletApplication.findOne({ userId }).select('status fullName appliedAt rejectReason').lean();
     const w = await SnapsaWallet.findOne({ userId }).lean();
     const application = appDoc

@@ -19,6 +19,7 @@ import https from 'https';
 import { v2 as cloudinary } from 'cloudinary';
 import Redis from 'ioredis';
 import admin from 'firebase-admin';
+import { registerSnapsaCrew } from './SnapsaCrew.js';
 import { registerSnapsaWallet, SnapsaWallet, SnapsaWalletApplication, SnapsaWalletPayout, SnapsaWalletEntry } from './SnapsaWallet.js';
 import Models from './Models.js';
 const { User, Post, Like, Comment, Share, Follower, Notification, FollowRequest } = Models;
@@ -617,6 +618,9 @@ const snapsaProfileSchema = new mongoose.Schema({
   snapsaTierExpiresAt: { type: Date, default: null },
   officialLabel: { type: String, default: '' },     // '' | 'OFFICIAL' | 'GOVERNMENT' | … — pin-style label under the username + pink badge (granted by an admin)
   officialOrg: { type: String, default: '' },
+  workCompany: { type: String, default: '' }, workPosition: { type: String, default: '' }, workStart: { type: String, default: '' },
+  workStatus: { type: String, default: '' },      // '' | pending | approved | rejected (only Snapsa-company claims need approval)
+  crewPosition: { type: String, default: '' },    // set only once an admin approves — makes the account SNAPSA CREW
   privacy: {
     privateAccount: { type: Boolean, default: false },
     hideLikedVideos: { type: Boolean, default: false },
@@ -659,6 +663,7 @@ const snapsaProfileSchema = new mongoose.Schema({
     subscriptionPriceCoins: { type: Number, default: 0 },
   },
   lastActiveAt: { type: Date, default: null },  
+  burnedAt: { type: Date, default: null },                      // last DEFCON 1 burn
   defconLevel: { type: Number, min: 1, max: 5, default: 5 },   // 5 normal · 4 restricted · 3 lockdown · 2 purge · 1 factory reset
   
   coins: { type: Number, default: 0 },
@@ -708,6 +713,7 @@ const snapsaPostSchema = new mongoose.Schema({
   vibe: { type: String, default: 'authentic' },            // authentic | pro | creative | intimate | anon
   mood: { type: String, default: '' },
   visibility: { type: String, enum: ['everyone', 'followers', 'me'], default: 'everyone' },
+  burned: { type: Boolean, default: false },               // author burned their identity (DEFCON 1): content gone, counts stay
   burn: { type: Boolean, default: false },                 // timed burn: the post deletes itself at expiresAt
   expiresAt: { type: Date, default: null },
   readers: [{ type: mongoose.Schema.Types.ObjectId }],
@@ -718,11 +724,12 @@ const snapsaPostSchema = new mongoose.Schema({
   qa: { type: String, default: '' },                       // question the author wants followers to answer
   song: { type: new mongoose.Schema({ title: String, artist: String }, { _id: false }), default: undefined },
   poll: { type: new mongoose.Schema({ question: String, endsAt: Date, options: [{ _id: false, text: String, votes: [mongoose.Schema.Types.ObjectId] }] }, { _id: false }), default: undefined },
+  repostOf: { type: mongoose.Schema.Types.ObjectId, default: null },   // this post re-shares another post
   likes: [{ type: mongoose.Schema.Types.ObjectId }],
   viewers: [{ type: mongoose.Schema.Types.ObjectId }],   // everyone who saw it or scrolled past it (author excluded)
   viewCount: { type: Number, default: 0 },
   shareCount: { type: Number, default: 0 },
-  comments: [{ userId: mongoose.Schema.Types.ObjectId, authorName: String, anon: { type: Boolean, default: false }, text: String, createdAt: { type: Date, default: Date.now } }],
+  comments: [{ userId: mongoose.Schema.Types.ObjectId, authorName: String, anon: { type: Boolean, default: false }, direct: { type: Boolean, default: false }, text: String, createdAt: { type: Date, default: Date.now } }],
 }, { timestamps: true, collection: 'snapsa_posts' });
 snapsaPostSchema.index({ createdAt: -1 });
 snapsaPostSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });   // burn time reached → the post is deleted
@@ -733,7 +740,7 @@ const snapsaMessageSchema = new mongoose.Schema({
   chatId: { type: String, required: true, index: true },
   senderId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   receiverId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  type: { type: String, enum: ['text','photo','video','voice','file'], default: 'text' },
+  type: { type: String, enum: ['text','photo','video','voice','file','system'], default: 'text' },
   text: { type: String, default: '' },
   mediaFile: { type: String, default: '' },
   duration: { type: Number, default: 0 },
@@ -744,6 +751,8 @@ const snapsaMessageSchema = new mongoose.Schema({
   read: { type: Boolean, default: false }, 
   deliveredAt: { type: Date, default: null }, 
   readAt: { type: Date, default: null },      
+  listenedAt: { type: Date, default: null },   // voice message: the receiver actually played it
+  callInfo: { kind: { type: String, default: null }, callType: { type: String, default: null }, duration: { type: Number, default: 0 }, callId: { type: String, default: null } },   // call bubbles in the chat
   replyContext: {
     kind: { type: String, enum: ['story_reply','story_reaction','product_tag', null], default: null },
     storyId: { type: mongoose.Schema.Types.ObjectId, ref: 'SnapsaStory', default: null },
@@ -761,6 +770,7 @@ const snapsaMessageSchema = new mongoose.Schema({
   storySnapshot: {
     thumbUrl: { type: String, default: null },
     authorName: { type: String, default: null },
+    caption: { type: String, default: null },
   },
    
   productSnapshot: {
@@ -786,7 +796,7 @@ snapsaMessageSchema.post('save', function (doc) {
 const SnapsaMessage = mongoose.models.SnapsaMessage || mongoose.model('SnapsaMessage', snapsaMessageSchema);
 const buildSnapChatId = (a,b) => [a.toString(), b.toString()].sort().join('_');
 
-const snapMsgStatus = (m) => m.readAt ? 'read' : m.deliveredAt ? 'delivered' : 'sent';
+const snapMsgStatus = (m) => (m.type === 'voice' && m.listenedAt) ? 'listened' : m.readAt ? 'read' : m.deliveredAt ? 'delivered' : 'sent';
 
 const snapsaTrackSchema = new mongoose.Schema({
   title: { type: String, required: true },
@@ -1443,7 +1453,7 @@ async function sendPushToUser(userId, { title, body, data = {}, channelId, ttlMs
       tokens,
       notification: { title: String(title || 'Snapsa'), body: String(body || '') },
       data: Object.fromEntries(Object.entries(data).map(([k, v]) => [k, String(v ?? '')])),
-      android: { priority: 'high', ...(ttlMs ? { ttl: ttlMs } : {}), notification: { channelId: channelId || 'snapsa_messages_v2', sound: 'default', priority: 'max', defaultSound: true, defaultVibrateTimings: true, visibility: 'public' } },
+      android: { priority: 'high', ...(ttlMs ? { ttl: ttlMs } : {}), notification: { icon: 'ic_stat_snapsa', color: '#FF2D95', channelId: channelId || 'snapsa_alerts_v4', priority: 'max', defaultVibrateTimings: true, visibility: 'public' } },
     });
     const dead = [];
     res.responses.forEach((r, i) => {
@@ -1553,7 +1563,7 @@ const app = express();
 // ── Snapsa Verified (pink check) for admin/founder Snapsa identities ──
 // Marks them with tier "snapsa" in every JSON response, so the app shows the
 // pink badge (and no WernTjat badge) next to their name everywhere.
-let _verifiedIds = new Set(), _verifiedAt = 0, _officialMap = new Map();
+let _verifiedIds = new Set(), _verifiedAt = 0, _officialMap = new Map(), _crewMap = new Map();
 async function getSnapsaVerifiedIds() {
   if (Date.now() - _verifiedAt < 60000) return _verifiedIds;
   try {
@@ -1561,6 +1571,8 @@ async function getSnapsaVerifiedIds() {
     const paid = await SnapsaVerification.find({ expiresAt: { $gt: new Date() } }).select('userId').lean();
     const offs = await SnapsaProfile.find({ officialLabel: { $nin: ['', null] } }).select('userId officialLabel').lean();
     _officialMap = new Map(offs.map(o => [String(o.userId), o.officialLabel]));
+    const crew = await SnapsaProfile.find({ crewPosition: { $nin: ['', null] } }).select('userId crewPosition').lean();
+    _crewMap = new Map(crew.map(o => [String(o.userId), o.crewPosition]));
     _verifiedIds = new Set([...rows.map(r => String(r._id)), ...paid.map(r => String(r.userId)), ..._officialMap.keys()]);
     _verifiedAt = Date.now();
   } catch (e) { console.error('[verified-ids]', e.message); }
@@ -1575,6 +1587,10 @@ function markSnapsaVerified(node, ids, depth = 0) {
   if (_officialMap.size) {
     const oid = idOf(node.authorId ?? node.userId ?? (('username' in node) ? node._id : ''));
     if (oid && _officialMap.has(oid) && !node.official && (typeof node.userId !== 'object' || node.userId === null || oid)) node.official = _officialMap.get(oid);
+  }
+  if (_crewMap.size) {
+    const cid = idOf(node.authorId ?? node.userId ?? (('username' in node) ? node._id : ''));
+    if (cid && _crewMap.has(cid) && !node.crew) node.crew = _crewMap.get(cid);
   }
   if ('authorSnapsaTier' in node && !node.authorTier && ids.has(idOf(node.authorId))) node.authorTier = 'snapsa';
   if ('snapsaTier' in node && !node.tier && ids.has(idOf(node.userId ?? node.id ?? node._id))) node.tier = 'snapsa';
@@ -1595,6 +1611,7 @@ app.use((req, res, next) => {
 });
 
 app.set('trust proxy', true);
+app.use((req, res, next) => { res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'); next(); });
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/snapsa/live/ws' });
 
@@ -1624,6 +1641,8 @@ registerSnapsaWallet(app, {
   createSnapNotification, sendSnapsaSystemMessage, SNAPSA_SYSTEM_ACCOUNT_ID,
   getCoinDeps: () => ({ awardCoins, getSnapsaCoinBalance, logCoinTransaction, SnapsaProfile, SNAPSA_COIN_VALUE_USD, usdRateFor }),
 });
+
+registerSnapsaCrew(app, { snapAuth, requireSnapAdmin, uploadLimiter, SnapsaProfile, SnapsaIdentity, sendSnapsaSystemMessage, refreshCrewCache: () => { _verifiedAt = 0; } });
 
 app.use('/snapsa/media', (req, res, next) => {
   const origin = req.headers.origin || '*';
@@ -2617,11 +2636,12 @@ app.post('/snapsa/messages/:userId', snapAuth, uploadLimiter, uploadMessageMedia
       replyContext = { kind, storyId: req.body.storyId };
       hideFromSender = kind === 'story_reaction';
       try {
-        const story = await SnapsaStory.findById(req.body.storyId).select('mediaFile authorName type').lean();
+        const story = await SnapsaStory.findById(req.body.storyId).select('mediaFile authorName type text qa').lean();
         if (story) {
           storySnapshot = {
             thumbUrl: story.type === 'photo' ? story.mediaFile : null, 
             authorName: story.authorName || null,
+            caption: String(story.text || story.qa || '').slice(0, 80) || null,
           };
         }
       } catch {}
@@ -2799,6 +2819,18 @@ app.post('/snapsa/messages/:userId/read', snapAuth, async (req, res) => {
     );
     res.json({ success: true });
   } catch (error) { res.status(500).json({ error: error.message }); }
+});
+
+app.post('/snapsa/messages/:id/listened', snapAuth, async (req, res) => {
+  try {
+    if (!req.userId || !mongoose.Types.ObjectId.isValid(req.params.id)) return res.status(400).json({ error: 'Invalid message' });
+    const now = new Date();
+    const m = await SnapsaMessage.findOneAndUpdate(
+      { _id: req.params.id, receiverId: req.userId, type: 'voice', listenedAt: null },
+      { $set: { listenedAt: now, deliveredAt: now, readAt: now, read: true } }, { new: true }).lean();
+    if (m) pushToSnapUser(m.senderId, { type: 'message_listened', messageId: String(m._id), chatId: m.chatId, listenedAt: now });
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 const SNAPSA_COMMITMENT_PATTERN = /^(0x)?[0-9a-fA-F]{64,}$/;
@@ -3344,18 +3376,10 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
     }
     excludedAuthors = [...excludedAuthors, ...restrictedIds, ...(await hiddenPrivateAuthorIds(req.userId))];
 
+    // PERF: filter + sort on the video's own fields FIRST. MongoDB pulls stages lazily, so the
+    // posts join below now runs only for the few videos actually returned, not for every video.
     const pipeline = [
-      {
-        $lookup: {
-          from: 'posts',
-          localField: 'postId',
-          foreignField: '_id',
-          as: 'post'
-        }
-      },
-      { $unwind: { path: '$post', preserveNullAndEmptyArrays: false } },
       { $match: {
-          'post.isActive': true,
           authorId: { $nin: excludedAuthors },
           $or: [
             { 'privacy.visibility': { $ne: 'private' } },
@@ -3363,6 +3387,11 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
           ],
         }
       }
+    ];
+    const _postJoin = [
+      { $lookup: { from: 'posts', localField: 'postId', foreignField: '_id', as: 'post' } },
+      { $unwind: { path: '$post', preserveNullAndEmptyArrays: false } },
+      { $match: { 'post.isActive': true } },
     ];
 
     if (sort === 'random') {
@@ -3376,10 +3405,12 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
             }
           },
         } },
-        { $sort: { _feedRandomJitter: -1 } }
+        { $sort: { _feedRandomJitter: -1 } },
+        ..._postJoin
       );
     } else if (sort === 'viral') {
       pipeline.push(
+        ..._postJoin,
         {
           $addFields: {
             viralScore: {
@@ -3402,7 +3433,7 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
         { $sort: { viralScore: -1 } }
       );
     } else {
-      pipeline.push({ $sort: { createdAt: -1 } });
+      pipeline.push({ $sort: { createdAt: -1 } }, ..._postJoin);
     }
 
     pipeline.push(
@@ -3527,7 +3558,7 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
       }
     );
 
-    const videos = await SnapsaVideo.aggregate(pipeline);
+    const videos = await SnapsaVideo.aggregate(pipeline).allowDiskUse(true);
     await enrichVideoCounts(videos, req.userId);
     for (const v of videos) {
       v.topGifters = topGiftersOf(v.gifters);
@@ -4153,14 +4184,22 @@ app.get('/snapsa/notifications', snapAuth, async (req, res) => {
   try {
     if (!req.userId) return res.json({ notifications: [] });
         const notifications = await Notification.find({ recipientId: req.userId })
-      .sort({ createdAt: -1 }).limit(50).lean();
+      .sort({ createdAt: -1 }).limit(200).lean();
     const senderIds = [...new Set(notifications.map(n => n.senderId && String(n.senderId)).filter(Boolean))];
     const profs = senderIds.length
-      ? await SnapsaProfile.find({ userId: { $in: senderIds } }).select('userId avatarUrl').lean()
+      ? await SnapsaProfile.find({ userId: { $in: senderIds } }).select('userId avatarUrl burnedAt').lean()
       : [];
     const avatarOf = {};
     profs.forEach(p => { avatarOf[String(p.userId)] = p.avatarUrl || null; });
-    notifications.forEach(n => { n.senderAvatar = n.senderId ? (avatarOf[String(n.senderId)] || null) : null; });
+    const burnedAtOf = {};
+    profs.forEach(p => { if (p.burnedAt) burnedAtOf[String(p.userId)] = new Date(p.burnedAt).getTime(); });
+    notifications.forEach(n => {
+      n.senderAvatar = n.senderId ? (avatarOf[String(n.senderId)] || null) : null;
+      const b = n.senderId ? burnedAtOf[String(n.senderId)] : 0;
+      if (b && new Date(n.createdAt).getTime() <= b) {   // sender burned their identity: keep the reason, drop every link to them
+        n.burned = true; n.senderId = null; n.senderAvatar = null; n.data = {};
+      }
+    });
     res.json({ notifications });
 
   } catch (error) { res.status(500).json({ error: error.message }); }
@@ -4284,8 +4323,8 @@ app.get('/snapsa/stories/feed', snapAuth, async (req, res) => {
     const authorIds = [...new Set(stories.map(s => s.authorId.toString()))];
     
     const profiles = await SnapsaProfile.find({ userId: { $in: authorIds } }).lean();
-    const avatarMap = {};
-    for (const p of profiles) avatarMap[p.userId.toString()] = p.avatarUrl || null;
+    const avatarMap = {}, nameOf = {}, tierOf = {};
+    for (const p of profiles) { avatarMap[p.userId.toString()] = p.avatarUrl || null; nameOf[p.userId.toString()] = p.displayName || ''; tierOf[p.userId.toString()] = p.snapsaTier || ''; }
 
     for (const s of stories) {
       const key = s.authorId.toString();
@@ -4294,6 +4333,8 @@ app.get('/snapsa/stories/feed', snapAuth, async (req, res) => {
       if (!grouped[key]) grouped[key] = {
         authorId: s.authorId,
         authorName: s.authorName,
+        authorDisplayName: nameOf[key] || '',
+        authorSnapsaTier: tierOf[key] || '',
         avatarUrl: avatarMap[key] || null,
         stories: [],
       };
@@ -4374,10 +4415,14 @@ app.get('/snapsa/stories/:id/viewers', snapAuth, async (req, res) => {
     const viewerIds = (story.viewers || []).map(v => v.userId || v);
     const profiles = await SnapsaProfile.find({ userId: { $in: viewerIds } }).lean();
     const profileMap = {};
-    for (const p of profiles) profileMap[p.userId.toString()] = p.username;
+    const full = {};
+    for (const p of profiles) { profileMap[p.userId.toString()] = p.username; full[p.userId.toString()] = p; }
     const viewers = (story.viewers || []).map(v => ({
       userId: v.userId || v,
       username: profileMap[(v.userId || v).toString()] || 'User',
+      displayName: full[(v.userId || v).toString()]?.displayName || '',
+      avatarUrl: full[(v.userId || v).toString()]?.avatarUrl || null,
+      authorSnapsaTier: full[(v.userId || v).toString()]?.snapsaTier || '',
       viewedAt: v.viewedAt || null,
     }));
     res.json({ viewers });
@@ -4480,19 +4525,21 @@ const shapePoll = (poll, me) => {
   return { question: poll.question, options: opts, total: opts.reduce((a, o) => a + o.count, 0), endsAt: poll.endsAt, ended: !!(poll.endsAt && new Date(poll.endsAt) <= new Date()), myVote: myVote >= 0 ? myVote : null };
 };
 // nameMap values are either an avatar url (old callers) or { avatarUrl, snapsaTier, official }
-const shapePost = (p, me, nameMap) => {
+const shapePost = (p, me, nameMap, reposts) => {
   const own = String(p.authorId) === String(me);
-  const anon = p.vibe === 'anon' && !own;
+  const burned = !!p.burned;
+  const anon = (p.vibe === 'anon' && !own) || burned;
   const pr = nameMap[String(p.authorId)];
   const prof = pr && typeof pr === 'object' ? pr : { avatarUrl: pr || null };
   return {
-    _id: p._id, authorId: anon ? null : p.authorId, authorName: anon ? 'Anonymous' : p.authorName, avatarUrl: anon ? null : (prof.avatarUrl || null),
-    authorSnapsaTier: anon ? '' : (prof.snapsaTier || ''), authorOfficial: anon ? null : (prof.officialLabel || null),
+    _id: p._id, authorId: anon ? null : p.authorId, authorName: burned ? '' : (anon ? 'Anonymous' : p.authorName), burned, avatarUrl: anon ? null : (prof.avatarUrl || null),
+    authorDisplayName: anon ? '' : (prof.displayName || ''), authorSnapsaTier: anon ? '' : (prof.snapsaTier || ''), authorOfficial: anon ? null : (prof.officialLabel || null),
     feeling: p.feeling || '', moodLevel: p.moodLevel || '', place: p.place || '', tags: (p.tags || []).map(t => ({ userId: t.userId, username: t.username })),
     qa: p.qa || '', song: p.song && p.song.title ? { title: p.song.title, artist: p.song.artist || '' } : null, poll: shapePoll(p.poll, me), expiresAt: p.expiresAt || null,
     text: p.text, mediaUrl: p.mediaFile || null, mediaType: p.mediaType || '', vibe: p.vibe, visibility: p.visibility, burn: !!p.expiresAt,
     likeCount: (p.likes || []).length, likedByMe: (p.likes || []).some(x => String(x) === String(me)),
     commentCount: (p.comments || []).length, viewCount: p.viewCount || 0, shareCount: p.shareCount || 0, own, createdAt: p.createdAt,
+    repost: p.repostOf ? ((reposts && reposts[String(p.repostOf)]) || { gone: true }) : null,
   };
 };
 
@@ -4510,9 +4557,18 @@ app.get('/snapsa/posts', snapAuth, async (req, res) => {
     const posts = await SnapsaPost.find(q).sort({ createdAt: -1 }).limit(60).lean();
     const nowD = new Date();
     const out = posts.filter(p => !(p.expiresAt && new Date(p.expiresAt) <= nowD));   // burned already (the TTL sweep runs once a minute)
-    const profiles = await SnapsaProfile.find({ userId: { $in: [...new Set(out.map(p => String(p.authorId)))] } }, 'userId avatarUrl snapsaTier officialLabel').lean();
-    const nameMap = {}; profiles.forEach(p => { nameMap[String(p.userId)] = { avatarUrl: p.avatarUrl, snapsaTier: p.snapsaTier, officialLabel: p.officialLabel || null }; });
-    res.json({ posts: out.map(p => shapePost(p, me, nameMap)) });
+    const profiles = await SnapsaProfile.find({ userId: { $in: [...new Set(out.map(p => String(p.authorId)))] } }, 'userId avatarUrl snapsaTier officialLabel displayName').lean();
+    const nameMap = {}; profiles.forEach(p => { nameMap[String(p.userId)] = { displayName: p.displayName || '', avatarUrl: p.avatarUrl, snapsaTier: p.snapsaTier, officialLabel: p.officialLabel || null }; });
+    const rIds = [...new Set(out.filter(p => p.repostOf).map(p => String(p.repostOf)))];
+    const reposts = {};
+    if (rIds.length) {
+      const origs = await SnapsaPost.find({ _id: { $in: rIds } }).lean();
+      for (const o of origs) {
+        if ((o.expiresAt && new Date(o.expiresAt) <= nowD) || o.vibe === 'anon' || o.burned) continue;
+        reposts[String(o._id)] = { _id: o._id, authorName: o.authorName, text: o.text || '', mediaUrl: o.mediaFile || null, mediaType: o.mediaType || '' };
+      }
+    }
+    res.json({ posts: out.map(p => shapePost(p, me, nameMap, reposts)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4567,11 +4623,22 @@ app.post('/snapsa/posts', snapAuth, uploadLimiter, uploadStory.single('media'), 
       visibility: ['everyone', 'followers', 'me'].includes(req.body.visibility) ? req.body.visibility : 'everyone',
       burn: !!expiresAt, expiresAt,
     });
+    // tell followers about the new post (not for anonymous / only-me posts)
+    if (post.visibility !== 'me' && post.vibe !== 'anon') {
+      Follower.find({ followingId: req.userId }).select('followerId').limit(500).lean().then(fs => {
+        const taggedIds = new Set(tags.map(t => String(t.userId)));
+        const who = profile?.displayName || profile?.username || 'Someone';
+        for (const f of fs) {
+          if (taggedIds.has(String(f.followerId))) continue;
+          createSnapNotification({ recipientId: f.followerId, senderId: req.userId, type: 'new_post', title: `${who} shared a new post`, body: (text || (post.mediaType ? 'Photo/video post' : '')).slice(0, 80), data: { postId: post._id, authorId: req.userId }, priority: 'medium', expiresAt: new Date(Date.now() + 14 * 86400000) }).catch(() => {});
+        }
+      }).catch(() => {});
+    }
     for (const t of tags) {
       if (String(t.userId) === String(req.userId)) continue;
       createSnapNotification({ recipientId: t.userId, senderId: req.userId, type: 'post_tag', title: `@${profile?.username || 'someone'} tagged you in a post`, body: text.slice(0, 80), data: { postId: post._id, authorId: req.userId }, priority: 'medium', expiresAt: new Date(Date.now() + 30 * 86400000) }).catch(() => {});
     }
-    res.json({ success: true, post: shapePost(post.toObject(), req.userId, { [String(req.userId)]: { avatarUrl: profile?.avatarUrl, snapsaTier: profile?.snapsaTier, officialLabel: profile?.officialLabel || null } }) });
+    res.json({ success: true, post: shapePost(post.toObject(), req.userId, { [String(req.userId)]: { displayName: profile?.displayName || '', avatarUrl: profile?.avatarUrl, snapsaTier: profile?.snapsaTier, officialLabel: profile?.officialLabel || null } }) });
   } catch (e) { cleanupTempFiles(tempPath); console.error('[post-create]', e.message); res.status(500).json({ error: e.message }); }
 });
 
@@ -4584,6 +4651,25 @@ app.post('/snapsa/posts/views', snapAuth, async (req, res) => {
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Repost: put someone's post on your own feed (optionally with a comment of your own)
+app.post('/snapsa/posts/:id/repost', snapAuth, async (req, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: 'Sign in to repost' });
+    if (!guardId(req, res)) return;
+    let orig = await SnapsaPost.findById(req.params.id).lean();
+    if (!orig || (orig.expiresAt && new Date(orig.expiresAt) <= new Date())) return res.status(404).json({ error: 'This post is no longer available' });
+    if (orig.repostOf) { const root = await SnapsaPost.findById(orig.repostOf).lean(); if (!root) return res.status(404).json({ error: 'The original post is gone' }); orig = root; }
+    if (orig.vibe === 'anon' || orig.visibility !== 'everyone') return res.status(403).json({ error: 'This post cannot be reposted' });
+    const profile = await SnapsaProfile.findOne({ userId: req.userId }).lean();
+    const text = String(req.body.text || '').replace(/[<>]/g, '').trim().slice(0, 500);
+    const post = await SnapsaPost.create({ authorId: req.userId, authorName: profile?.username || 'unknown', text, repostOf: orig._id, vibe: 'authentic', visibility: 'everyone' });
+    await SnapsaPost.updateOne({ _id: orig._id }, { $inc: { shareCount: 1 } });
+    if (String(orig.authorId) !== String(req.userId)) createSnapNotification({ recipientId: orig.authorId, senderId: req.userId, type: 'post_repost', title: `@${profile?.username || 'someone'} reposted your post`, body: (orig.text || '').slice(0, 80), data: { postId: orig._id }, priority: 'medium', expiresAt: new Date(Date.now() + 14 * 86400000) }).catch(() => {});
+    const reposts = { [String(orig._id)]: { _id: orig._id, authorName: orig.authorName, text: orig.text || '', mediaUrl: orig.mediaFile || null, mediaType: orig.mediaType || '' } };
+    res.json({ success: true, post: shapePost(post.toObject(), req.userId, { [String(req.userId)]: { displayName: profile?.displayName || '', avatarUrl: profile?.avatarUrl, snapsaTier: profile?.snapsaTier, officialLabel: profile?.officialLabel || null } }, reposts) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/snapsa/posts/:id/share', snapAuth, async (req, res) => {
   try {
     if (!guardId(req, res)) return;
@@ -4631,9 +4717,13 @@ app.post('/snapsa/posts/:id/like', snapAuth, async (req, res) => {
 
 app.get('/snapsa/posts/:id/comments', snapAuth, async (req, res) => {
   try {
-    const p = await SnapsaPost.findById(req.params.id).select('comments').lean();
+    const p = await SnapsaPost.findById(req.params.id).select('comments authorId').lean();
     if (!p) return res.status(404).json({ error: 'Post not found' });
-    res.json({ comments: (p.comments || []).slice(-100).map(c => c.anon ? { _id: c._id, authorName: 'Anonymous', anon: true, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) } : { _id: c._id, userId: c.userId, authorName: c.authorName, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) }) });
+    const isAuthor = String(p.authorId) === String(req.userId);
+    const cl = (p.comments || []).slice(-100);
+    const cprofs = await SnapsaProfile.find({ userId: { $in: [...new Set(cl.filter(c => !c.anon).map(c => String(c.userId)))] } }, 'userId displayName').lean();
+    const dnMap = {}; cprofs.forEach(x => { dnMap[String(x.userId)] = x.displayName || ''; });
+    res.json({ comments: cl.map(c => (c.direct && !isAuthor && String(c.userId) !== String(req.userId)) ? { _id: c._id, direct: true, hidden: true, authorName: '', text: '', createdAt: c.createdAt, mine: false } : c.anon ? { _id: c._id, authorName: 'Anonymous', anon: true, direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) } : { _id: c._id, userId: c.userId, authorName: c.authorName, authorDisplayName: dnMap[String(c.userId)] || '', direct: !!c.direct, text: c.text, createdAt: c.createdAt, mine: String(c.userId) === String(req.userId) }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4643,11 +4733,12 @@ app.post('/snapsa/posts/:id/comments', snapAuth, async (req, res) => {
     const text = String(req.body.text || '').trim().slice(0, 500);
     if (!text) return res.status(400).json({ error: 'Empty comment' });
     const profile = await SnapsaProfile.findOne({ userId: req.userId }).lean();
-    const anon = req.body.anon === true || req.body.anon === 'true';
-    const c = { userId: req.userId, authorName: anon ? 'Anonymous' : (profile?.username || 'unknown'), anon, text, createdAt: new Date() };
+    const direct = req.body.direct === true || req.body.direct === 'true';
+    const anon = !direct && (req.body.anon === true || req.body.anon === 'true');
+    const c = { userId: req.userId, authorName: anon ? 'Anonymous' : (profile?.username || 'unknown'), anon, direct, text, createdAt: new Date() };
     const r = await SnapsaPost.updateOne({ _id: req.params.id, 'comments.199': { $exists: false } }, { $push: { comments: c } });
     if (!r.matchedCount) return res.status(400).json({ error: 'Comments are closed on this post' });
-    res.json({ success: true, comment: { authorName: c.authorName, anon, text, createdAt: c.createdAt, mine: true } });
+    res.json({ success: true, comment: { authorName: c.authorName, anon, direct, text, createdAt: c.createdAt, mine: true } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -4672,7 +4763,7 @@ app.get('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
     
     const authorIds = [...new Set(comments.map(c => c.userId?._id?.toString()).filter(Boolean))];
     const profiles = authorIds.length
-      ? await SnapsaProfile.find({ userId: { $in: authorIds } }, 'userId username avatarUrl snapsaTier').lean()
+      ? await SnapsaProfile.find({ userId: { $in: authorIds } }, 'userId username displayName avatarUrl snapsaTier').lean()
       : [];
     const profileMap = {};
     for (const p of profiles) profileMap[p.userId.toString()] = p;
@@ -4682,8 +4773,8 @@ app.get('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
       const profile = uid ? profileMap[uid] : null;
       return {
         ...c,
-        _displayName: profile?.username
-          ? `@${profile.username}`
+        _displayName: (profile?.displayName || profile?.username)
+          ? (profile.displayName || profile.username)
           : (c.userId?.firstName ? `${c.userId.firstName} ${c.userId.lastName||''}`.trim() : (c.userId?.displayName || null)),
         _avatarUrl: profile?.avatarUrl || null,
         _snapsaTier: profile?.snapsaTier || '',
@@ -4739,7 +4830,8 @@ app.post('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
       }).catch(() => {});
     }
 
-    res.json({ success: true, comment });
+    const mine = await SnapsaProfile.findOne({ userId: req.userId }, 'username displayName avatarUrl snapsaTier').lean();
+    res.json({ success: true, comment: { ...(comment.toObject ? comment.toObject() : comment), _displayName: mine?.displayName || mine?.username || null, _avatarUrl: mine?.avatarUrl || null, _snapsaTier: mine?.snapsaTier || '' } });
   } catch (error) {
     if (session && session.inTransaction()) await session.abortTransaction();
     console.error('[comment]', error);
@@ -8950,13 +9042,69 @@ function replayPendingCall(userId, ws) {
   p.ice.forEach(c => out({ signal: 'ice', candidate: c }));
 }
 
-app.get('/snapsa/call/ice', snapAuth, (req, res) => {
+// ICE servers for calls. Best: Cloudflare Realtime TURN (set CF_TURN_KEY_ID + CF_TURN_API_TOKEN on Render) — short-lived credentials are made here.
+// Or any fixed TURN: TURN_URL (comma separated), TURN_USERNAME, TURN_CREDENTIAL.
+let _cfIce = null, _cfIceAt = 0;
+async function getCloudflareIce() {
+  if (!process.env.CF_TURN_KEY_ID || !process.env.CF_TURN_API_TOKEN) return null;
+  if (_cfIce && Date.now() - _cfIceAt < 6 * 3600 * 1000) return _cfIce;
+  try {
+    const r = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${process.env.CF_TURN_KEY_ID}/credentials/generate-ice-servers`, {
+      method: 'POST', headers: { Authorization: `Bearer ${process.env.CF_TURN_API_TOKEN}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ ttl: 86400 }),
+    });
+    if (!r.ok) { console.error('[turn] cloudflare', r.status); return _cfIce; }
+    const d = await r.json();
+    const list = Array.isArray(d.iceServers) ? d.iceServers : (d.iceServers ? [d.iceServers] : []);
+    // Cloudflare's :53 URLs are blocked by browsers — drop them
+    _cfIce = list.map(x => ({ ...x, urls: (Array.isArray(x.urls) ? x.urls : [x.urls]).filter(u => !/:53(\?|$)/.test(u)) })).filter(x => x.urls.length);
+    _cfIceAt = Date.now();
+  } catch (e) { console.error('[turn] cloudflare', e.message); }
+  return _cfIce;
+}
+app.get('/snapsa/call/ice', snapAuth, async (req, res) => {
   const iceServers = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
-  // TURN relay so calls also work on strict mobile networks. Set TURN_URL (comma separated), TURN_USERNAME, TURN_CREDENTIAL on Render.
-  if (process.env.TURN_URL) {
+  const cf = await getCloudflareIce();
+  if (cf?.length) iceServers.push(...cf);
+  else if (process.env.TURN_URL) {
     iceServers.push({ urls: process.env.TURN_URL.split(',').map(s => s.trim()).filter(Boolean), username: process.env.TURN_USERNAME || '', credential: process.env.TURN_CREDENTIAL || '' });
   }
-  res.json({ iceServers });
+  res.json({ iceServers, relay: !!(cf?.length || process.env.TURN_URL) });
+});
+
+// ── Calls leave a bubble in the chat (missed / declined / finished with length / attempt made while the caller was offline)
+const callLog = new Map();   // callId -> { caller, callee, callType, answeredAt }
+setInterval(() => { const cut = Date.now() - 2 * 3600 * 1000; for (const [k, v] of callLog) if (v.startedAt < cut) callLog.delete(k); }, 600000).unref?.();
+async function writeCallBubble({ caller, callee, callType, kind, duration = 0, callId = null }) {
+  try {
+    const label = { completed: 'Call', missed: 'Missed call', declined: 'Declined call', attempt: 'Call attempt' }[kind] || 'Call';
+    const now = new Date();
+    const seen = kind === 'completed' || kind === 'declined';   // only missed calls / attempts count as unread
+    const doc = await SnapsaMessage.create({
+      chatId: buildSnapChatId(caller, callee), senderId: caller, receiverId: callee, type: 'system',
+      text: `${callType === 'video' ? 'Video' : 'Voice'} ${label.toLowerCase()}`,
+      callInfo: { kind, callType, duration, callId },
+      deliveredAt: now, ...(seen ? { readAt: now, read: true } : {}),
+    });
+    broadcastToUser(String(callee), { type: 'snapsa_dm', message: { ...doc.toObject(), status: snapMsgStatus(doc) } });
+  } catch (e) { console.error('[call-bubble]', e.message); }
+}
+// Caller had no connection: the app rings for 10 s, ends, and sends this when the connection is back.
+app.post('/snapsa/call/attempt', snapAuth, async (req, res) => {
+  try {
+    if (!req.userId) return res.status(401).json({ error: 'Sign in' });
+    const to = String(req.body.to || '');
+    if (!/^[a-f0-9]{24}$/i.test(to) || to === String(req.userId)) return res.status(400).json({ error: 'Invalid recipient' });
+    const callId = String(req.body.callId || '').slice(0, 64) || null;
+    if (callId && await SnapsaMessage.exists({ 'callInfo.callId': callId })) return res.json({ success: true, duplicate: true });
+    if (await isBlockedBy(to, req.userId)) return res.json({ success: true });
+    const callType = req.body.callType === 'video' ? 'video' : 'audio';
+    await writeCallBubble({ caller: req.userId, callee: to, callType, kind: 'attempt', callId });
+    snapActorName(req.userId).then(name => sendPushToUser(to, {
+      title: `Missed ${callType === 'video' ? 'video' : 'voice'} call`, body: `${name} tried to call you but they were offline`,
+      data: { type: 'missed_call', senderId: req.userId },
+    })).catch(() => {});
+    res.json({ success: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 const callSignalLimiter = rateLimit({ windowMs: 60000, max: 600 });
@@ -8982,6 +9130,17 @@ app.post('/snapsa/call/signal', snapAuth, callSignalLimiter, async (req, res) =>
       if (await getAccountRestriction(to)) return res.json({ success: true, delivered: false });
       const toDef = (await SnapsaProfile.findOne({ userId: to }).select('defconLevel').lean())?.defconLevel || 5;
       if (toDef <= 3 && !(await Follower.exists({ followerId: to, followingId: me }))) return res.json({ success: true, delivered: false });
+      callLog.set(callId, { caller: me, callee: to, callType, startedAt: Date.now(), answeredAt: null });
+    }
+    {
+      const L = callLog.get(callId);
+      if (L && type === 'answer' && !L.answeredAt) L.answeredAt = Date.now();
+      if (L && ['end', 'decline', 'busy'].includes(type)) {
+        callLog.delete(callId);
+        const duration = L.answeredAt ? Math.max(1, Math.round((Date.now() - L.answeredAt) / 1000)) : 0;
+        const kind = L.answeredAt ? 'completed' : type === 'decline' ? 'declined' : 'missed';
+        writeCallBubble({ caller: L.caller, callee: L.callee, callType: L.callType, kind, duration, callId });
+      }
     }
     const fromName = type === 'offer' ? await snapActorName(me) : undefined;
     const fromAvatar = type === 'offer' ? ((await SnapsaProfile.findOne({ userId: me }, 'avatarUrl').lean().catch(() => null))?.avatarUrl || '') : undefined;
@@ -9001,7 +9160,7 @@ app.post('/snapsa/call/signal', snapAuth, callSignalLimiter, async (req, res) =>
       sendPushToUser(to, {
         title: `Incoming ${callType} call`, body: `@${fromName} is calling you on Snapsa`,
         data: { type: 'incoming_call', callId, senderId: me, callType },
-        channelId: 'snapsa_calls_v1', ttlMs: PENDING_CALL_MS,
+        channelId: 'snapsa_calls_v2', ttlMs: PENDING_CALL_MS,
       });
       return res.json({ success: true, delivered: false, queued: true });
     }
@@ -9030,6 +9189,22 @@ app.post('/snapsa/presence/ping', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
+
+// Notifications are kept for a year (raises any shorter TTL index the notification model may have)
+(function keepNotificationsAYear() {
+  const run = async () => {
+    try {
+      const col = Notification.collection;
+      for (const i of await col.indexes()) {
+        if (typeof i.expireAfterSeconds === 'number' && i.expireAfterSeconds < 31536000) {
+          await mongoose.connection.db.command({ collMod: col.collectionName, index: { name: i.name, expireAfterSeconds: 31536000 } });
+          console.log('[notif-ttl] raised', i.name, 'to 1 year');
+        }
+      }
+    } catch (e) { console.error('[notif-ttl]', e.message); }
+  };
+  if (mongoose.connection.readyState === 1) run(); else mongoose.connection.once('open', run);
+})();
 
 // ───────── DEFCON: the user's own threat level ─────────
 const DEFCON_INFO = {
@@ -9087,18 +9262,47 @@ app.post('/snapsa/defcon/burn', snapAuth, async (req, res) => {
         await logCoinTransaction({ userId: me, type: 'credit', amount: giftCoins, description: 'DEFCON 1: gifts converted to coins', metadata: { toWallet } }).catch(() => {});
       }
     } catch (e) { console.error('[defcon/gifts]', e.message); }
-    const [st, po, ms, nt] = await Promise.all([
-      SnapsaStory.deleteMany({ authorId: me }),
-      SnapsaPost.deleteMany({ authorId: me }),
-      SnapsaMessage.deleteMany({ $or: [{ senderId: me }, { receiverId: me }] }),
-      Notification.deleteMany({ $or: [{ recipientId: me }, { senderId: me }] }).catch(() => ({ deletedCount: 0 })),
+    // ── everything is removed BEFORE we answer, so the app's "burning…" screen only ends when it is all gone
+    const meOid = new mongoose.Types.ObjectId(String(me));
+    // videos: the feed card (post) goes inactive, the video + saved copies are deleted
+    const vids = await SnapsaVideo.find({ authorId: me }).select('_id postId').lean();
+    const vidIds = vids.map(v => v._id), vidPostIds = vids.map(v => v.postId).filter(Boolean);
+    if (vidPostIds.length) await Post.updateMany({ _id: { $in: vidPostIds } }, { $set: { isActive: false, deletedAt: new Date() } }).catch(() => {});
+    const vd = await SnapsaVideo.deleteMany({ authorId: me });
+    if (vidIds.length) await SnapsaSavedVideo.deleteMany({ videoId: { $in: vidIds } }).catch(() => {});
+    await SnapsaSavedVideo.deleteMany({ userId: me }).catch(() => {});
+    // chats: all messages go; the other person keeps an empty chat with a "burned identity" notice
+    const chats = await SnapsaMessage.aggregate([
+      { $match: { $or: [{ senderId: meOid }, { receiverId: meOid }] } },
+      { $group: { _id: '$chatId', other: { $first: { $cond: [{ $eq: ['$senderId', meOid] }, '$receiverId', '$senderId'] } } } },
     ]);
-    await SnapsaProfile.updateOne({ userId: me }, { $set: { defconLevel: 5 } });
+    const ms = await SnapsaMessage.deleteMany({ $or: [{ senderId: me }, { receiverId: me }] });
+    if (chats.length) {
+      await SnapsaMessage.insertMany(chats.map(c => ({
+        chatId: c._id, senderId: me, receiverId: c.other, type: 'system',
+        text: 'THE USER BURNED THEIR IDENTITY', hideFromSender: true,
+      }))).catch(e => console.error('[defcon/notice]', e.message));
+    }
+    // posts: the content goes, the shell (time, likes, comments, shares) stays with a DEFCON 1 pill
+    const po = await SnapsaPost.updateMany({ authorId: me }, { $set: { burned: true, text: '', mediaFile: '', mediaType: '', feeling: '', place: '', mood: '', moodLevel: '', qa: '', tags: [] }, $unset: { poll: 1, song: 1 } });
+    const st = await SnapsaStory.deleteMany({ authorId: me });
+    // notifications: only the ones in THEIR inbox are removed; what they sent to others stays (shown without any link to them)
+    const nt = await Notification.deleteMany({ recipientId: me }).catch(() => ({ deletedCount: 0 }));
+    await SnapsaProfile.updateOne({ userId: me }, { $set: { defconLevel: 5, burnedAt: new Date() } });
     _defconCache.delete(String(me));
-    res.json({ success: true, giftCoins, toWallet, burned: { stories: st.deletedCount, posts: po.deletedCount, messages: ms.deletedCount, notifications: nt.deletedCount || 0 } });
+    res.json({ success: true, giftCoins, toWallet, burned: { videos: vd.deletedCount, stories: st.deletedCount, posts: po.modifiedCount || 0, chats: chats.length, messages: ms.deletedCount, notifications: nt.deletedCount || 0 } });
   } catch (e) { console.error('[defcon/burn]', e.message); res.status(500).json({ error: 'Burn failed' }); }
 });
 
+app.get('/snapsa/profile-by-username/:username', snapAuth, async (req, res) => {
+  try {
+    const u = String(req.params.username || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40);
+    if (!u) return res.status(400).json({ error: 'Bad username' });
+    const p = await SnapsaProfile.findOne({ username: u.toLowerCase() }).select('userId username').lean();
+    if (!p) return res.status(404).json({ error: 'Not found' });
+    res.json({ id: String(p.userId), username: p.username });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/snapsa/users/:userId/presence', snapAuth, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.userId)) return res.status(400).json({ error: 'Invalid user' });
@@ -9194,6 +9398,9 @@ app.get('/snapsa/users/:userId', snapAuth, async (req, res) => {
         countryCode: profile?.countryCode || null,
         countryName: profile?.countryName || null,
         inCircle: String(req.userId) === String(req.params.userId) ? !!profile?.privacy?.inCircle : undefined,
+        work: profile?.workCompany ? { company: profile.workCompany, position: profile.workPosition || '', start: profile.workStart || '', status: (profile.workStatus === 'approved' || String(req.userId) === String(req.params.userId)) ? profile.workStatus : '' } : null,
+        crew: profile?.crewPosition || '',
+        official: profile?.officialLabel || '',
       },
       videos,
       nextCursor,
