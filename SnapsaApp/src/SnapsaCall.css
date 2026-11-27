@@ -33,10 +33,10 @@
 /* VIDEO — stage keeps the frame artwork's proportions (941 x 1672) */
 .sv-stage { position: absolute; left: 0; width: 100%; height: min(100dvh, 195vw); top: calc((100dvh - min(100dvh, 195vw)) / 2); }
 .sv-frame { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; user-select: none; }
-.sv-remote { position: absolute; z-index: 1; left: 4.89%; top: 23.44%; width: 91.18%; height: 59.57%; border-radius: 3.2vw; overflow: hidden; background: #0a0414; }
+.sv-remote { position: absolute; z-index: 1; left: 4.25%; top: 23.74%; width: 91.7%; height: 63%; border-radius: 0; overflow: hidden; background: #0a0414; }
 .sv-remote video, .sv-local video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .sv-local video { transform: scaleX(-1); }
-.sv-local { position: absolute; z-index: 1; left: 83.4%; top: 23.56%; width: 12.3%; height: 10.82%; border-radius: 2.3vw; overflow: hidden; background: #16052d; }
+.sv-local { position: absolute; z-index: 1; left: 83%; top: 23.68%; width: 13.2%; height: 10.9%; border-radius: 2.6vw; overflow: hidden; background: #16052d; }
 .sv-wait, .sv-camoff { position: absolute; inset: 0; display: grid; place-items: center; color: #d5b4ff; font-size: 13px; text-align: center; padding: 4px; }
 .sv-camoff { background: #16052d; font-size: 10px; }
 .sv-name { position: absolute; z-index: 4; left: 19%; width: 63%; top: 17.6%; height: 4%; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: clamp(13px,4vw,19px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 0 8px rgba(160,60,255,.8); }

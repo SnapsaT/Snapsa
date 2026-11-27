@@ -6,7 +6,33 @@ import { timeAgo } from './StoryShared';
 
 const C = { pink: '#FF2D95', dark: '#07030F', card: '#150B28', border: 'rgba(180,76,255,0.30)', gray: '#A59BC4' };
 
-export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast, currentUser, ownAvatar, StoryViewer }) {
+// One arc per story around the avatar (a single story = one full ring). A burn story's arc is amber with a flame on it.
+function StoryRing({ stories, seenAll, size = 62, children }) {
+  const n = Math.max(1, stories.length), r = size / 2 - 3, c = 2 * Math.PI * r, gap = n > 1 ? Math.min(6, c / n / 3) : 0, seg = c / n - gap;
+  const id = 'sr' + Math.random().toString(36).slice(2, 7);
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} style={{ position: 'absolute', inset: 0 }}>
+        <defs><linearGradient id={id} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#FF2D95" /><stop offset=".55" stopColor="#B44CFF" /><stop offset="1" stopColor="#FFD600" /></linearGradient></defs>
+        {stories.map((st, i) => {
+          const seen = st.viewedByMe === true || (st.viewedByMe === undefined && seenAll);
+          return <circle key={i} cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={3} strokeLinecap="round"
+            stroke={seen ? 'rgba(255,255,255,.28)' : st.burn ? '#fbbf24' : `url(#${id})`}
+            strokeDasharray={`${Math.max(1, seg)} ${c - Math.max(1, seg)}`} strokeDashoffset={-(i * (c / n)) - gap / 2}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`} />;
+        })}
+      </svg>
+      <div style={{ position: 'absolute', inset: 5, borderRadius: '50%', overflow: 'hidden', background: C.dark, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>{children}</div>
+      {stories.map((st, i) => {
+        if (!st.burn) return null;
+        const a = ((i + 0.5) / n) * 2 * Math.PI - Math.PI / 2;
+        return <span key={'f' + i} style={{ position: 'absolute', left: size / 2 + Math.cos(a) * r - 8, top: size / 2 + Math.sin(a) * r - 9, fontSize: 14, lineHeight: '18px', width: 16, textAlign: 'center', filter: 'drop-shadow(0 0 3px #000)' }}>🔥</span>;
+      })}
+    </div>
+  );
+}
+
+export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast, currentUser, ownAvatar, StoryViewer, renderBadge }) {
   const [groups, setGroups] = useState(null);
   const [creating, setCreating] = useState(false);
   const [viewing, setViewing] = useState(null);
@@ -31,16 +57,13 @@ export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast
     const burn = g.stories.some(s => s.burn);
     return (
       <button onClick={() => open(g)} style={{ display: 'flex', alignItems: 'center', gap: 12, width: '100%', textAlign: 'left', background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 12, cursor: 'pointer', color: 'white' }}>
-        <div style={{ width: 54, height: 54, borderRadius: '50%', padding: 3, flexShrink: 0, background: g.allViewedByMe ? 'rgba(255,255,255,.25)' : 'linear-gradient(135deg,#FF2D95,#B44CFF,#FFD600)' }}>
-          <div style={{ width: '100%', height: '100%', borderRadius: '50%', background: C.dark, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 }}>
-            {g.avatarUrl ? <img src={mediaHref(g.avatarUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (g.authorName || '?')[0].toUpperCase()}
-          </div>
-        </div>
+        <StoryRing stories={g.stories} seenAll={g.allViewedByMe}>
+          {g.avatarUrl ? <img src={mediaHref(g.avatarUrl)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : (g.authorDisplayName || g.authorName || '?')[0].toUpperCase()}
+        </StoryRing>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 800, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>@{g.authorName}</div>
+          <div style={{ fontWeight: 800, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.authorDisplayName || g.authorName}</span>{renderBadge?.(g)}</div>
           <div style={{ color: C.gray, fontSize: 12, marginTop: 2 }}>{g.stories.length} {g.stories.length === 1 ? 'story' : 'stories'} · {last.createdAt ? timeAgo(last.createdAt) : ''}</div>
         </div>
-        {burn && <span style={{ color: '#fbbf24', display: 'flex', alignItems: 'center', gap: 3, fontSize: 11, fontWeight: 800 }}><Flame size={14} /> BURN</span>}
       </button>
     );
   };

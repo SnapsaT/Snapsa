@@ -210,7 +210,7 @@ export default function StoryCreator({ onClose, showToast, snapFetch }) {
           </div>
         ) : (
           <>
-            <div style={{ margin: '16px auto 0', width: 'min(62vw, 250px)', aspectRatio: '9 / 16', borderRadius: 20, overflow: 'hidden', position: 'relative', border: `1px solid ${C.border}`, background: gradientBg ? bg : '#000' }}>
+            {!(kind === 'voice' && !(file && preview)) && <div style={{ margin: '16px auto 0', width: 'min(62vw, 250px)', aspectRatio: '9 / 16', borderRadius: 20, overflow: 'hidden', position: 'relative', border: `1px solid ${C.border}`, background: gradientBg ? bg : '#000' }}>
               {kind === 'photo' && preview && (is3d ? <Story3DPhoto src={preview} fill /> : <img src={preview} alt="" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />)}
               {kind === 'video' && preview && <video src={preview} controls muted playsInline loop style={{ width: '100%', height: '100%', objectFit: 'contain' }} />}
               {kind === 'voice' && (file && preview
@@ -218,8 +218,8 @@ export default function StoryCreator({ onClose, showToast, snapFetch }) {
                 : (<div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, color: 'white', padding: 12, textAlign: 'center' }}><Mic size={40} /><span style={{ fontSize: 13, fontWeight: 700 }}>{recording ? 'Recording…' : 'Record a voice story'}</span></div>))}
               {kind !== 'voice' && caption}
               {burn && <div style={{ position: 'absolute', top: 8, left: 8, background: 'rgba(0,0,0,.6)', color: '#fbbf24', fontSize: 10, fontWeight: 800, padding: '3px 8px', borderRadius: 999 }}>🔥 BURN</div>}
-            </div>
-            <textarea value={text} onChange={e => setText(e.target.value.slice(0, 500))} rows={2} placeholder="Add a caption (optional)…" style={{ ...fieldStyle, marginTop: 14, resize: 'none' }} />
+            </div>}
+            {kind !== 'voice' && <textarea value={text} onChange={e => setText(e.target.value.slice(0, 500))} rows={2} placeholder="Add a caption (optional)…" style={{ ...fieldStyle, marginTop: 14, resize: 'none' }} />}
           </>
         )}
 

@@ -4,6 +4,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Heart, MessageCircle, Eye, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
 import { timeAgo } from './StoryShared';
 import { SponsoredCard } from './AdsTab';
+import SendToChatSheet from './VideoShareExtras';
 import { PC as C, PostMeta, OfficialPill, BurnPill, PollCard, FeelPanel, MoodPanel, PlacePanel, TagPanel, SongPanel, QaPanel, PollPanel, BurnPanel, PhotoAnnotator, fmtBurn } from './PostExtras';
 
 const VIBES = [['authentic', '❤️ Authentic'], ['pro', '💼 Pro'], ['creative', '🎨 Creative'], ['intimate', '🌸 Intimate'], ['anon', '👤 Anon']];
@@ -21,7 +22,7 @@ function Avatar({ url, name, mediaHref, size = 40 }) {
   );
 }
 
-function PostCard({ p, mediaHref, renderBadges, snapFetch, showToast, onLike, onOpenComments, onShare, onDelete, onGone, onPoll }) {
+function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToast, onLike, onOpenComments, onShare, onDelete, onGone, onPoll }) {
   const [menu, setMenu] = useState(false);
   const vibeLabel = (VIBES.find(v => v[0] === p.vibe) || VIBES[0])[1];
   const icon = { background: 'none', border: 'none', color: C.gray, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, cursor: 'pointer', padding: 0 };
@@ -31,7 +32,7 @@ function PostCard({ p, mediaHref, renderBadges, snapFetch, showToast, onLike, on
         <Avatar url={p.avatarUrl} name={p.authorName} mediaHref={mediaHref} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <span style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>@{p.authorName}</span>
+            <span style={{ color: 'white', fontWeight: 800, fontSize: 15 }}>{p.authorDisplayName || p.authorName}</span>
             {p.authorId && renderBadges?.(p)}
             {p.expiresAt && <BurnPill expiresAt={p.expiresAt} onGone={onGone} />}
           </div>
@@ -51,6 +52,15 @@ function PostCard({ p, mediaHref, renderBadges, snapFetch, showToast, onLike, on
       </div>
       <PostMeta p={p} />
       {p.text && <p style={{ color: 'white', fontSize: 15, lineHeight: 1.5, margin: '0 0 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{p.text}</p>}
+      {p.repost && (p.repost.gone
+        ? <div style={{ border: `1px dashed ${C.border}`, borderRadius: 14, padding: 12, margin: '0 0 10px', color: C.gray, fontSize: 13 }}>🔁 The original post is no longer available</div>
+        : <div style={{ border: `1px solid ${C.border}`, borderRadius: 14, padding: 12, margin: '0 0 10px', background: 'rgba(255,255,255,.04)' }}>
+            <div style={{ color: C.gray, fontSize: 12, fontWeight: 800, marginBottom: 4 }}>🔁 Reposted from {p.repost.authorName}</div>
+            {p.repost.text && <p style={{ color: 'white', fontSize: 14, lineHeight: 1.45, margin: '0 0 8px', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{p.repost.text}</p>}
+            {p.repost.mediaUrl && (p.repost.mediaType === 'video'
+              ? <video src={mediaHref(p.repost.mediaUrl)} controls playsInline style={{ width: '100%', borderRadius: 10, maxHeight: 300, background: '#000' }} />
+              : <img src={mediaHref(p.repost.mediaUrl)} alt="" onClick={() => onOpenMedia?.(mediaHref(p.repost.mediaUrl))} style={{ width: '100%', borderRadius: 10, maxHeight: 320, objectFit: 'cover', cursor: 'zoom-in' }} />)}
+          </div>)}
       {p.qa && <div style={{ background: 'rgba(244,114,182,.1)', border: '1px solid rgba(244,114,182,.4)', borderRadius: 14, padding: '10px 12px', margin: '0 0 10px' }}>
         <div style={{ color: '#f9a8d4', fontSize: 11, fontWeight: 800, letterSpacing: 1 }}>❓ Q&amp;A</div>
         <div style={{ color: 'white', fontWeight: 700, margin: '3px 0 8px' }}>{p.qa}</div>
@@ -58,7 +68,7 @@ function PostCard({ p, mediaHref, renderBadges, snapFetch, showToast, onLike, on
       </div>}
       {p.mediaUrl && (p.mediaType === 'video'
         ? <video src={mediaHref(p.mediaUrl)} controls playsInline style={{ width: '100%', borderRadius: 12, maxHeight: 360, background: '#000', marginBottom: 10 }} />
-        : <img src={mediaHref(p.mediaUrl)} alt="" style={{ width: '100%', borderRadius: 12, maxHeight: 420, objectFit: 'cover', marginBottom: 10 }} />)}
+        : <img src={mediaHref(p.mediaUrl)} alt="" onClick={() => onOpenMedia?.(mediaHref(p.mediaUrl))} style={{ width: '100%', borderRadius: 12, maxHeight: 420, objectFit: 'cover', marginBottom: 10, cursor: 'zoom-in' }} />)}
       {p.song && <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'rgba(16,185,129,.15)', border: '1px solid rgba(16,185,129,.45)', color: '#6ee7b7', borderRadius: 999, padding: '5px 12px', fontSize: 12.5, fontWeight: 700, marginBottom: 10 }}><Music size={14} /> {p.song.title}{p.song.artist ? ` — ${p.song.artist}` : ''}</div>}
       {p.poll && <PollCard post={p} snapFetch={snapFetch} showToast={showToast} onChange={poll => onPoll(p, poll)} />}
       <div style={{ display: 'flex', gap: 18, marginTop: 6, alignItems: 'center' }}>
@@ -115,13 +125,26 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
   }, [tab, posts && posts.length, mine]);
   useEffect(() => () => { clearTimeout(flushT.current); const ids = queueRef.current.splice(0); if (ids.length) snapFetch('/snapsa/posts/views', { method: 'POST', body: JSON.stringify({ ids }) }).catch(() => {}); }, []);
 
-  const sharePost = useCallback(async (p) => {
+  const [viewImg, setViewImg] = useState(null);        // full-screen photo
+  const [shareFor, setShareFor] = useState(null);     // post being shared (action sheet)
+  const [sendFor, setSendFor] = useState(null);       // post being sent as a message
+  const sharePost = useCallback((p) => setShareFor(p), []);
+  const shareOutside = useCallback(async (p) => {
     const t = `${p.authorName ? '@' + p.authorName + ' on Snapsa: ' : ''}${(p.text || '').slice(0, 200)}`;
     try { const { Share } = await import('@capacitor/share'); await Share.share({ text: t, dialogTitle: 'Share post' }); }
     catch { try { await navigator.share?.({ text: t }); } catch { return; } }
     snapFetch(`/snapsa/posts/${p._id}/share`, { method: 'POST' }).catch(() => {});
     setPosts(l => (l || []).map(x => x._id === p._id ? { ...x, shareCount: (x.shareCount || 0) + 1 } : x));
   }, [snapFetch]);
+  const repost = useCallback(async (p) => {
+    try {
+      const r = await snapFetch(`/snapsa/posts/${p._id}/repost`, { method: 'POST', body: JSON.stringify({}) });
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(d.error || 'Could not repost');
+      showToast?.('🔁 Reposted to your feed', 'success');
+      setPosts(l => [d.post, ...(l || []).map(x => x._id === p._id ? { ...x, shareCount: (x.shareCount || 0) + 1 } : x)]);
+    } catch (e) { showToast?.(e.message, 'error'); }
+  }, [snapFetch, showToast]);
 
   const load = useCallback(() => {
     snapFetch(`/snapsa/posts${mine ? '?mine=1' : ''}`).then(r => r.ok ? r.json() : null).then(d => setPosts(d?.posts || [])).catch(() => setPosts(p => p || []));
@@ -185,6 +208,30 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
 
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 560, background: C.dark, display: 'flex', flexDirection: 'column' }}>
+      {viewImg && (
+        <div onClick={() => setViewImg(null)} style={{ position: 'absolute', inset: 0, zIndex: 90, background: 'rgba(0,0,0,.95)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <button onClick={() => setViewImg(null)} aria-label="Close" style={{ position: 'absolute', top: 'calc(env(safe-area-inset-top,0px) + 14px)', right: 14, background: 'rgba(255,255,255,.14)', border: 'none', borderRadius: '50%', width: 38, height: 38, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><X size={20} style={{ color: 'white' }} /></button>
+          <img src={viewImg} alt="" onClick={e => e.stopPropagation()} style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+        </div>
+      )}
+      {shareFor && !sendFor && (
+        <div onClick={() => setShareFor(null)} style={{ position: 'absolute', inset: 0, zIndex: 80, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#12061f', borderTop: `1px solid ${C.border}`, borderRadius: '22px 22px 0 0', padding: '16px 16px calc(16px + env(safe-area-inset-bottom,0px))' }}>
+            <h3 style={{ margin: '0 0 12px', color: 'white' }}>Share post</h3>
+            {[['💬', 'Send as message', 'Send it to people you follow', () => setSendFor(shareFor)],
+              ['🔁', 'Repost', 'Put it on your own feed', () => { const q = shareFor; setShareFor(null); repost(q); }],
+              ['📤', 'Share outside Snapsa', 'WhatsApp, SMS and other apps', () => { const q = shareFor; setShareFor(null); shareOutside(q); }]].map(([ic, t, sub, fn]) => (
+              <button key={t} onClick={fn} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '12px 8px', background: 'none', border: 'none', textAlign: 'left', cursor: 'pointer' }}>
+                <span style={{ fontSize: 26 }}>{ic}</span>
+                <span><span style={{ display: 'block', color: 'white', fontWeight: 800, fontSize: 15 }}>{t}</span><span style={{ display: 'block', color: C.gray, fontSize: 12 }}>{sub}</span></span>
+              </button>))}
+          </div>
+        </div>
+      )}
+      {sendFor && <SendToChatSheet title="Send post to…" snapFetch={snapFetch} snapUrl="" showToast={showToast}
+        message={`📝 ${sendFor.authorName ? '@' + sendFor.authorName + ' on Snapsa' : 'A Snapsa post'}${sendFor.text ? ':\n“' + sendFor.text.slice(0, 280) + '”' : ''}`}
+        sharedPath={`/snapsa/posts/${sendFor._id}/share`}
+        onClose={(n) => { if (n) setPosts(l => (l || []).map(x => x._id === sendFor._id ? { ...x, shareCount: (x.shareCount || 0) + n } : x)); setSendFor(null); setShareFor(null); }} />}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 'calc(env(safe-area-inset-top,0px) + 12px) 14px 10px', background: '#000', borderBottom: `1px solid ${C.border}` }}>
         <button onClick={onClose} aria-label="Back" style={{ background: 'none', border: 'none', padding: 6, cursor: 'pointer' }}><ArrowLeft size={22} style={{ color: 'white' }} /></button>
         <h2 style={{ margin: 0, color: 'white', fontSize: 19, fontWeight: 800, flex: 1 }}>Snapsa Posts</h2>
@@ -200,7 +247,7 @@ export default function PostsScreen({ onClose, snapFetch, mediaHref, showToast, 
           posts === null ? <p style={{ color: C.gray, textAlign: 'center', marginTop: 40 }}>Loading posts…</p>
           : posts.length === 0 ? <p style={{ color: C.gray, textAlign: 'center', marginTop: 40 }}>{mine ? "You haven't posted yet." : 'No posts yet. Be the first!'}</p>
           : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>{posts.map((p, i) => <React.Fragment key={p._id}>
-              <PostCard p={p} mediaHref={mediaHref} renderBadges={renderBadges} snapFetch={snapFetch} showToast={showToast} onLike={like} onOpenComments={setOpen} onShare={sharePost} onDelete={remove} onGone={() => gone(p._id)} onPoll={setPostPoll} />
+              <PostCard p={p} mediaHref={mediaHref} renderBadges={renderBadges} onOpenMedia={setViewImg} snapFetch={snapFetch} showToast={showToast} onLike={like} onOpenComments={setOpen} onShare={sharePost} onDelete={remove} onGone={() => gone(p._id)} onPoll={setPostPoll} />
               {!mine && (i === 2 || (i > 2 && (i - 2) % 6 === 0)) && <SponsoredCard snapFetch={snapFetch} mediaHref={mediaHref} />}
             </React.Fragment>)}</div>
         ) : (
@@ -285,7 +332,7 @@ function Comments({ post, snapFetch, showToast, onClose, onCount }) {
         {post.qa && <div style={{ margin: '0 16px 8px', padding: '9px 12px', borderRadius: 12, background: 'rgba(244,114,182,.1)', border: '1px solid rgba(244,114,182,.4)', color: 'white', fontWeight: 700 }}>❓ {post.qa}</div>}
         <div style={{ overflowY: 'auto', padding: '0 16px', flex: 1 }}>
           {list === null ? <p style={{ color: C.gray }}>Loading…</p> : list.length === 0 ? <p style={{ color: C.gray }}>{post.qa ? 'No answers yet.' : 'No comments yet.'}</p> : list.map((c, i) => (
-            <p key={i} style={{ color: 'white', fontSize: 14, margin: '0 0 10px' }}><strong style={{ color: C.pink }}>@{c.authorName}</strong> {c.text}</p>))}
+            <p key={i} style={{ color: 'white', fontSize: 14, margin: '0 0 10px' }}><strong style={{ color: C.pink }}>{c.authorDisplayName || c.authorName}</strong> {c.text}</p>))}
         </div>
         <div style={{ display: 'flex', gap: 8, padding: '10px 14px calc(10px + env(safe-area-inset-bottom,0px))', alignItems: 'center' }}>
           <button onClick={() => setAnon(a => !a)} title="Comment as" style={{ flexShrink: 0, padding: '8px 10px', borderRadius: 999, border: anon ? '1.5px solid #fff' : `1px solid ${C.border}`, background: anon ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.06)', color: 'white', fontSize: 12, fontWeight: 700 }}>{anon ? '👤 Anon' : '🙂 Me'}</button>

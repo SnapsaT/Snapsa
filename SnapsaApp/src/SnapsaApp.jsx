@@ -8,7 +8,7 @@ import {
   Plus, ScrollText, AlertTriangle, Megaphone, Home, User, Bookmark, Play, Volume2, VolumeX,
   Camera, Video, ChevronRight, Check,
   ArrowLeft, Radio, Store, Shield, TrendingUp, Tv, Settings, FileText, Newspaper, BarChart3, Flag, Ban, EyeOff, MoreHorizontal, ShieldAlert,
-  Square, Upload, Users, Repeat2, Download, BadgeCheck,
+  Square, Upload, Users, Repeat2, Download, BadgeCheck, MoreVertical,
   Pause, RotateCcw, ChevronDown, Eye, RefreshCw, ChevronUp,
   Bell, GiftIcon, Wallet, Coins, ShoppingBag, Banknote, Calendar, Receipt,
   ArrowUpRight, ArrowDownLeft, AlertCircle, Info, CheckCircle2,
@@ -16,17 +16,17 @@ import {
   Sparkles, Type, Move, Trash2, Share2, ImagePlus, Pencil, CreditCard, QrCode, ScanLine, Copy, Compass, Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import LiveStreamSystem, { 
-  LiveStreamService, 
-  LiveStreamErrorBoundary 
-} from './LiveStream.jsx';
+// The live-stream code (and its heavy IVS broadcast library) is only downloaded when someone goes live
+const LiveStreamSystem = React.lazy(() => import('./LiveStream.jsx'));
 import { SubscriptionBadge } from './SnapsaBadges.jsx';
-import { jsPDF } from 'jspdf';
-import QRCode from 'qrcode';
-import jsQR from 'jsqr';
+// PERF: jspdf / qrcode / jsqr are loaded only when used (keeps them out of the startup bundle)
+let _jsQRp = null, _jsQR = null;
+const ensureJsQR = () => { if (!_jsQRp) _jsQRp = import('jsqr').then(m => { _jsQR = m.default || m; }); return _jsQRp; };
 import { createPortal } from 'react-dom';
 import { listOffline, isNativeApp } from './native/offlineStore';
 import OfflineSyncPanel from './native/OfflineSyncPanel';
+import { useBubbleTheme } from './bubbleTheme';
+import { cacheVideoFile, getCachedVideoUrl, isVideoCached, saveFeedSnapshot, loadFeedSnapshot } from './videoCache';
 import { outboxAdd, outboxList, flushOutbox, isNetworkError } from './outbox';
 import * as apiCache from './native/apiCache';
 import { registerForPush, playSnapsaPing } from './native/pushNotifications';
@@ -46,6 +46,11 @@ import { OfficialPill } from './PostExtras';
 import AdsTab, { AdminPromoReview, FeedAdSlide } from './AdsTab';
 import { Story3DPhoto, StoryVoicePlayer, StoryStickers } from './StoryExtras';
 import './SnapsaBottomNav.css';
+import { makeGreeting } from './ProfileGreetings';
+import FeedLoader from './FeedLoader';
+import ShareSnapsaCard from './ShareCard';
+import { DownloadPrompt, useDeepLink } from './DeepLink';
+import { CrewPill, WorkLine, WorkEditor, ShirtFlipButton, CrewShirtModal, AdminCrew } from './CrewKit';
 import './SnapsaModals.css';
 import './SnapsaCyber.css';
 import './SnapsaNeon.css';
@@ -697,7 +702,31 @@ const SnapsaAdVideo = ({ onEnded, style, loop = false }) => {
 };
 
 
+// Snapsa neon loading ring — shown over a video's thumbnail while its data is still arriving
+const NeonLoader = ({ size = 54, label }) => (
+  <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
+    <div style={{ width:size, height:size, borderRadius:'50%', border:'3px solid rgba(180,76,255,.18)', borderTopColor:'#ff2d95', borderRightColor:'#b44cff', boxShadow:'0 0 18px rgba(180,76,255,.55), 0 0 36px rgba(255,45,149,.3)', animation:'snapsaNeonSpin .9s linear infinite' }}/>
+    {label && <span style={{ color:'rgba(255,255,255,.7)', fontSize:12, fontWeight:700, letterSpacing:.4 }}>{label}</span>}
+    <style>{'@keyframes snapsaNeonSpin{to{transform:rotate(360deg)}}'}</style>
+  </div>
+);
+
+// Plays once per session, as a normal slide between videos (never as a gate before the feed)
+const HouseAdSlide = ({ active }) => {
+  return (
+    <div style={{ width:'100%', height:'100%', background:'#000', position:'relative', overflow:'hidden' }}>
+      {active ? <SnapsaAdVideo loop={false} onEnded={() => {}} style={{ position:'absolute', inset:0, width:'100%', height:'100%', objectFit:'cover' }}/> : <div style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}><NeonLoader/></div>}
+      <div style={{ position:'absolute', left:16, bottom:118, display:'flex', alignItems:'center', gap:6, pointerEvents:'none' }}>
+        <span style={{ color:SNAPSA_VERIFIED_PINK, fontWeight:800, fontSize:15, letterSpacing:.6 }}>SNAPSA</span>
+        <SnapsaVerifiedBadge size={15}/>
+        <span style={{ color:'rgba(255,255,255,.7)', fontSize:11, fontWeight:700 }}>(Ad)</span>
+      </div>
+    </div>
+  );
+};
+
 let _snapsaAdWatched = false;
+let _snapsaHouseAdShown = false;
 
 // The ad is optional. It plays while the feed loads; a small arrow at the bottom shows
 // "Loading feed…" and, once the feed is ready, turns into "Swipe up for next video".
@@ -811,11 +840,14 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     const loadImg = (src, cors) => new Promise((res, rej) => { const i = new Image(); if (cors) i.crossOrigin = 'anonymous'; i.onload = () => res(i); i.onerror = rej; i.src = src; });
     // Who is posting: avatar + verified badge (own profile, fetched once)
     let avatarUrl = opts.avatarUrl || null, verified = opts.verified;
-    if (avatarUrl == null || verified == null) {
+    let crew = opts.crew, official = opts.official;
+    if (avatarUrl == null || verified == null || crew == null || official == null) {
       try {
         const r = await snapFetch('/snapsa/me'); const d = r.ok ? await r.json() : null; const p = d?.profile || {};
         if (avatarUrl == null) avatarUrl = p.avatarUrl || null;
-        if (verified == null) verified = !!(p.tier === 'snapsa' || p.snapsaVerified || p.verified || p.wernTier);
+        if (verified == null) verified = !!(p.tier === 'snapsa' || p.snapsaVerified || p.verified || p.wernTier || p.officialLabel || p.crewPosition);
+        if (crew == null) crew = p.crewPosition ? 'CREW' : '';
+        if (official == null) official = p.officialLabel || '';
       } catch {}
     }
     let logoImg = null, avatarImg = null;
@@ -827,7 +859,9 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     const W = 728;
     const lh = logoImg ? Math.round(W * logoImg.naturalHeight / logoImg.naturalWidth) : 90;
     const rowH = 118, gap = 14;
-    const mainH = lh + gap + rowH + 12;
+    crew = crew || ''; official = official || '';
+    const offH = official ? 70 : 0;
+    const mainH = lh + gap + rowH + offH + 12;
     const H = Math.ceil(mainH / 0.83);
     const canvas = document.createElement('canvas');
     canvas.width = W; canvas.height = H;
@@ -840,7 +874,8 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     ctx.font = '700 58px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     const nameW = Math.min(ctx.measureText(name).width, W - 230);
     const av = 98, badge = verified ? 50 : 0, g1 = 22, g2 = verified ? 14 : 0;
-    const rowW = av + g1 + nameW + g2 + badge;
+    const crewH = Math.round(badge * 0.8), crewW = crew ? Math.round(crewH * 2.6) : 0, g3 = crew ? 12 : 0;
+    const rowW = av + g1 + nameW + g3 + crewW + g2 + badge;
     let x = Math.max(10, (W - rowW) / 2);
     const cy = lh + gap + rowH / 2;
     // avatar with white ring
@@ -856,13 +891,31 @@ const makeWatermarkOverlay = async (username, opts = {}) => {
     ctx.fillStyle = '#ffffff'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.font = '700 58px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif';
     ctx.fillText(name, x, cy + 2, nameW);
-    x += nameW + g2;
+    x += nameW + g3;
+    if (crew) {
+      ctx.save(); ctx.shadowColor = 'rgba(255,90,0,0.9)'; ctx.shadowBlur = 10;
+      const pg = ctx.createLinearGradient(x, 0, x + crewW, 0); pg.addColorStop(0, '#ff9a1f'); pg.addColorStop(0.55, '#ff4d00'); pg.addColorStop(1, '#d61a00');
+      ctx.fillStyle = pg; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x, cy - crewH / 2, crewW, crewH, crewH / 2) : ctx.rect(x, cy - crewH / 2, crewW, crewH); ctx.fill();
+      ctx.shadowColor = 'transparent'; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = `900 ${Math.round(crewH * 0.58)}px system-ui, sans-serif`;
+      try { ctx.letterSpacing = '2px'; } catch {}
+      ctx.fillText('CREW', x + crewW / 2 + 1, cy + 1); try { ctx.letterSpacing = '0px'; } catch {}
+      ctx.restore(); ctx.textAlign = 'left';
+    }
+    x += crewW + g2;
     // verified badge (pink scalloped seal with a white tick)
     if (verified) {
       ctx.save(); ctx.translate(x, cy - badge / 2); ctx.scale(badge / 24, badge / 24);
       ctx.fillStyle = '#D81B60'; ctx.fill(new Path2D('M12 2l2.4 1.4 2.7-.4 1.3 2.4 2.4 1.4-.4 2.7L22 12l-1.6 2.5.4 2.7-2.4 1.4-1.3 2.4-2.7-.4L12 22l-2.4-1.4-2.7.4-1.3-2.4-2.4-1.4.4-2.7L2 12l1.6-2.5-.4-2.7 2.4-1.4 1.3-2.4 2.7.4L12 2z'));
       ctx.shadowColor = 'transparent'; ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
       ctx.stroke(new Path2D('M8.4 12.4l2.4 2.4 4.8-5'));
+      ctx.restore();
+    }
+    if (official) {
+      ctx.save(); ctx.shadowColor = 'transparent';
+      const ph = 48; ctx.font = '800 28px system-ui, sans-serif'; try { ctx.letterSpacing = '3px'; } catch {}
+      const pw = Math.ceil(ctx.measureText(official).width) + 44, px = (W - pw) / 2, py = lh + gap + rowH + 4;
+      ctx.fillStyle = 'rgba(216,27,96,0.92)'; ctx.beginPath(); ctx.roundRect ? ctx.roundRect(px, py, pw, ph, ph / 2) : ctx.rect(px, py, pw, ph); ctx.fill();
+      ctx.fillStyle = '#fff'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(official, W / 2 + 1, py + ph / 2 + 1);
       ctx.restore();
     }
     // "DISCOVER ON SNAPSA" (only visible on the end screen — the server crops it off the corner mark)
@@ -1443,7 +1496,7 @@ const AllowDownloadToggle = ({ value, onChange }) => {
   );
 };
 
-const AuthorBadges = ({ wernTier, snapsaTier, snapsaVerified = false, size = 13 }) => {
+const AuthorBadges = ({ wernTier, snapsaTier, snapsaVerified = false, size = 13, crew = '' }) => {
   const [open, setOpen] = useState(null); // 'wern' | 'snapsa' | null
   const wrapRef = useRef(null);
   const resolved = resolveSnapsaTier(wernTier, snapsaTier);
@@ -1455,10 +1508,11 @@ const AuthorBadges = ({ wernTier, snapsaTier, snapsaVerified = false, size = 13 
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
-  if (!wernTier && !resolved && !snapsaVerified) return null;
+  if (!wernTier && !resolved && !snapsaVerified && !crew) return null;
 
   return (
     <span ref={wrapRef} style={{ position:'relative', display:'inline-flex', alignItems:'center', gap:3 }}>
+      {crew && <CrewPill position={crew} size={size} />}
             {false && (
         <span onClick={e=>{ e.stopPropagation(); setOpen(o=>o==='wern'?null:'wern'); }}
           style={{ cursor:'pointer', display:'inline-flex' }}>
@@ -1707,7 +1761,7 @@ const SnapInBubble = ({ source, bubble, isActive }) => {
   );
 };
 
-const VideoCard = ({ video, isActive, onComment, onShare, onShowLikers, onViewProfile, onGift, onSnapIn, onMore, onOpenProductStore, currentUser, onAutoScroll, followingMap, setFollowingMap, onPlayStateChange, scrollInProgress, showToast }) => {
+const VideoCard = ({ video, isActive, isNear, onComment, onShare, onShowLikers, onViewProfile, onGift, onSnapIn, onMore, onOpenProductStore, currentUser, onAutoScroll, followingMap, setFollowingMap, onPlayStateChange, scrollInProgress, showToast }) => {
   const videoRef = useRef(null);
   const tapTimer = useRef(null);
   const progressRef = useRef(null);
@@ -1737,6 +1791,26 @@ const VideoCard = ({ video, isActive, onComment, onShare, onShowLikers, onViewPr
   const [ended, setEnded] = useState(false);
   const [autoScrollEnabled] = useState(false);
   const [cachedSrc, setCachedSrc] = useState(() => mediaHref(video.videoUrl) || video.videoUrl);
+  const remoteSrcRef = useRef(mediaHref(video.videoUrl) || video.videoUrl);
+  // No connection (or the stream fails): play the copy we saved while it was online.
+  useEffect(() => {
+    const remote = remoteSrcRef.current;
+    let live = true;
+    const useCopy = () => getCachedVideoUrl(remote).then(u => { if (live && u) { setVideoError(false); setCachedSrc(u); } });
+    if (!navigator.onLine) useCopy();
+    const off = () => useCopy();
+    window.addEventListener('offline', off);
+    return () => { live = false; window.removeEventListener('offline', off); };
+  }, []);
+  // Watching it online: after a few seconds, keep a copy for later (only the video you are actually viewing).
+  useEffect(() => {
+    if (!isActive || !navigator.onLine) return;
+    const remote = remoteSrcRef.current;
+    if (!remote || remote.startsWith('blob:') || isVideoCached(remote)) return;
+    const t = setTimeout(() => { cacheVideoFile(remote); }, 4000);
+    return () => clearTimeout(t);
+  }, [isActive]);
+  const [buffering, setBuffering] = useState(false);
   const [triedFallback, setTriedFallback] = useState(false);
   const [videoError, setVideoError] = useState(false);
   const [hasUserInteracted, setHasUserInteracted] = useState(false); 
@@ -1978,6 +2052,10 @@ useEffect(() => {
 
   const handleVideoError = useCallback(() => {
     console.error('[Video] Error loading video:', cachedSrc);
+    if (!navigator.onLine && !String(cachedSrc).startsWith('blob:')) {
+      getCachedVideoUrl(remoteSrcRef.current).then(u => { if (u) { setVideoError(false); setCachedSrc(u); } else setVideoError(true); });
+      return;
+    }
 
     if (!triedFallback) {
       setTriedFallback(true);
@@ -2200,7 +2278,12 @@ useEffect(() => {
             loop={false}
             muted={muted}
             playsInline
-            preload="auto"
+            poster={video.thumbUrl ? mediaHref(video.thumbUrl) : undefined}
+            onLoadStart={() => setBuffering(true)}
+            onWaiting={() => setBuffering(true)}
+            onCanPlay={() => setBuffering(false)}
+            onPlaying={() => setBuffering(false)}
+            preload={(isActive || isNear) ? 'auto' : 'none'}
             crossOrigin="anonymous"
             onTimeUpdate={handleTimeUpdate}
             onLoadedMetadata={handleLoadedMetadata}
@@ -2219,6 +2302,8 @@ useEffect(() => {
           />
         )}
         
+        {buffering && isActive && !videoError && <div style={{ position:'absolute', inset:0, zIndex:3, pointerEvents:'none', display:'flex', alignItems:'center', justifyContent:'center' }}><NeonLoader/></div>}
+
         {video.snapInSource?.videoUrl && (
           <SnapInBubble source={video.snapInSource} bubble={video.snapInBubble} isActive={isActive}/>
         )}
@@ -2388,7 +2473,7 @@ useEffect(() => {
             <span style={{ color: isOwn ? S.yellow : 'white', fontWeight: 700, fontSize: 14, textShadow: '0 1px 5px rgba(0,0,0,.9)' }}>
                         {video.authorDisplayName || video.authorName}
         </span>
-        <AuthorBadges wernTier={video.authorTier} snapsaTier={video.authorSnapsaTier} />
+        <AuthorBadges wernTier={video.authorTier} snapsaTier={video.authorSnapsaTier} crew={video.crew} />
           </div>
           {video.official && <OfficialPill label={video.official} />}
           {video.isLive && <span style={{ background: S.pink, color: 'white', fontSize: 10, fontWeight: 900, padding: '2px 8px', borderRadius: 4 }}>LIVE</span>}
@@ -2854,6 +2939,7 @@ const SwipeableNotifRow = ({ n, onTap, onOpenProfile, onSwipeConfirm, splitTitle
   const avatar = n.senderAvatar ? mediaHref(n.senderAvatar) : null;
   const thumb = n.data?.thumbUrl ? mediaHref(n.data.thumbUrl) : null;
   const unread = !n.read;
+  const burned = !!n.burned;   // sender burned their identity (DEFCON 1): no links back to them
 
   const onPointerDown = (e) => { dragging.current = true; startX.current = (e.touches ? e.touches[0].clientX : e.clientX) - dragX; };
   const onPointerMove = (e) => {
@@ -2884,7 +2970,8 @@ const SwipeableNotifRow = ({ n, onTap, onOpenProfile, onSwipeConfirm, splitTitle
         <Trash2 size={20} style={{ color:'white' }}/>
       </div>
       <div role="button" tabIndex={0}
-        onClick={() => { if (Math.abs(dragX) < 5) onTap(n); }}
+        onClick={() => { if (Math.abs(dragX) < 5 && !burned) onTap(n); }}
+        data-noswipe="1"
         onMouseDown={onPointerDown} onMouseMove={onPointerMove} onMouseUp={onPointerUp} onMouseLeave={onPointerUp}
         onTouchStart={onPointerDown} onTouchMove={onPointerMove} onTouchEnd={onPointerUp}
         style={{
@@ -2912,14 +2999,14 @@ const SwipeableNotifRow = ({ n, onTap, onOpenProfile, onSwipeConfirm, splitTitle
 
         <div style={{ flex:1, minWidth:0 }}>
           <p style={{ color:'white', fontSize:14, lineHeight:1.35, fontWeight:500 }}>
-            {handle && <span onClick={e => { e.stopPropagation(); onOpenProfile(n); }} style={{ fontWeight:800 }}>{handle}</span>}
+            {handle && <span onClick={e => { e.stopPropagation(); if (!burned) onOpenProfile(n); }} style={{ fontWeight:800 }}>{handle}</span>}
             {rest}
           </p>
           {n.body && <p style={{ color:'rgba(255,255,255,.72)', fontSize:12.5, marginTop:2, lineHeight:1.35 }}>{renderRich(n.body)}</p>}
-          <p style={{ color:'rgba(200,170,255,.6)', fontSize:11.5, marginTop:4 }}>{notifAgo(n.createdAt)}</p>
+          <p style={{ color:'rgba(200,170,255,.6)', fontSize:11.5, marginTop:4, display:'flex', alignItems:'center', gap:8 }}>{notifAgo(n.createdAt)}{burned && <span style={{ background:'linear-gradient(90deg,#ff5a1f,#ff2d2d)', color:'#fff', fontSize:10, fontWeight:900, letterSpacing:.8, padding:'2px 9px', borderRadius:999 }}>DEFCON 1</span>}</p>
         </div>
 
-        {n.type === 'follow' ? (
+        {n.type === 'follow' && !burned ? (
           <button onClick={followBack} style={{
             flexShrink:0, padding:'9px 14px', borderRadius:999, border:'none', cursor:'pointer', color:'white', fontWeight:800, fontSize:12.5,
             background: followed ? 'rgba(255,255,255,.1)' : 'linear-gradient(135deg,#8b2cf5,#ff2d95)', boxShadow: followed ? 'none' : '0 0 14px rgba(255,45,149,.55)',
@@ -2989,7 +3076,7 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
   }, [mediaReady, idx]);
 
   useEffect(() => {
-    if (paused || !story || !mediaReady) {
+    if (paused || modalOpen || !story || !mediaReady) {
       lastTickRef.current = null;
       return;
     }
@@ -3006,15 +3093,15 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
     };
     progressRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(progressRef.current);
-  }, [idx, paused, story, storyDurationMs, mediaReady]);
+  }, [idx, paused, modalOpen, story, storyDurationMs, mediaReady]);
 
   
   useEffect(() => {
     const v = storyVideoRef.current;
     if (!v) return;
-    if (paused) v.pause();
+    if (paused || modalOpen) v.pause();
     else v.play().catch(() => {});
-  }, [paused, idx]);
+  }, [paused, modalOpen, idx]);
 
   const wasLongPressRef = useRef(false);
   const touchActiveRef = useRef(false);
@@ -3153,12 +3240,12 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
               : group.authorName?.[0]?.toUpperCase()}
           </button>
           <div>
-            <span style={{ color:'white', fontWeight:700, fontSize:13 }}>@{group.authorName}</span>
+            <span style={{ color:'white', fontWeight:700, fontSize:13, display:'inline-flex', alignItems:'center', gap:4 }}>{group.authorDisplayName || group.authorName}<AuthorBadges snapsaTier={group.authorSnapsaTier} size={13}/></span>
             <p style={{ color:'rgba(255,255,255,0.55)', fontSize:10, margin:0 }}>
               {postedAgo}
               {story.burn && <span style={{ color:'#fbbf24', fontWeight:700 }}> • 🔥 BURN · one view</span>}
               {story.repostOf && story.repostAuthorName && (
-                <span style={{ color:S.pink, fontWeight:700 }}> • REPOST • @{story.repostAuthorName}</span>
+                <span style={{ color:S.pink, fontWeight:700 }}> • REPOST • {story.repostAuthorName}</span>
               )}
             </p>
           </div>
@@ -3313,11 +3400,11 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
               ? <p style={{ color:S.gray, fontSize:13, textAlign:'center', padding:20 }}>No view data yet</p>
               : viewerList.map((v,i) => (
                 <div key={i} style={{ display:'flex', alignItems:'center', gap:10, padding:'8px 0', borderBottom:`1px solid ${S.border}` }}>
-                  <div style={{ width:32, height:32, borderRadius:'50%', background:S.pink, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, fontSize:13 }}>
-                    {(v.username||'U')[0].toUpperCase()}
+                  <div style={{ width:36, height:36, borderRadius:'50%', background:S.pink, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, fontSize:13, overflow:'hidden', flexShrink:0 }}>
+                    {v.avatarUrl ? <img src={mediaHref(v.avatarUrl)} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : (v.displayName||v.username||'U')[0].toUpperCase()}
                   </div>
-                  <div style={{ flex:1 }}>
-                    <p style={{ color:'white', fontSize:13, fontWeight:600, margin:0 }}>@{v.username||'User'}</p>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ color:'white', fontSize:13, fontWeight:600, margin:0, display:'flex', alignItems:'center', gap:4 }}>{v.displayName||v.username||'User'}<AuthorBadges snapsaTier={v.authorSnapsaTier} size={12}/></p>
                     {v.viewedAt && <p style={{ color:S.gray, fontSize:10, margin:0 }}>{new Date(v.viewedAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</p>}
                   </div>
                 </div>
@@ -3689,9 +3776,9 @@ const SnapInRecorder = ({ source, currentUser, showToast, onClose, onPosted }) =
   );
 };
 
-const FeedScreen = ({ currentUser, feedH, onViewProfile, showToast, feedMode: feedModeProp, onFeedModeChange, overlayOpen, snapsaAvatar, onOpenProductStore }) => {
+const FeedScreen = ({ currentUser, feedH, onViewProfile, showToast, feedMode: feedModeProp, onFeedModeChange, overlayOpen, snapsaAvatar, onOpenProductStore, singleVideo }) => {
   const [activeIdx,    setActiveIdx]    = useState(0);
-  const [feedVideos,   setFeedVideos]   = useState([]);
+  const [feedVideos,   setFeedVideos]   = useState(singleVideo ? [singleVideo] : []);   // singleVideo: a video opened from a profile, with every feed action working
   const [commentVideo, setCommentVideo] = useState(null);
   const { t: tr } = useLanguage();
   const [safetyVideo, setSafetyVideo] = useState(null);
@@ -3751,7 +3838,7 @@ const FeedScreen = ({ currentUser, feedH, onViewProfile, showToast, feedMode: fe
   const watchEarnEligible = watchEarnActive || hasGiftFunds;
   const [comment,      setComment]      = useState('');
   const [comments,     setComments]     = useState({});
-  const [loading,      setLoading]      = useState(true);
+  const [loading,      setLoading]      = useState(!singleVideo);
  
   const [followingMap, setFollowingMap] = useState({});
   const [viewingStoryGroup, setViewingStoryGroup] = useState(null);
@@ -3898,6 +3985,11 @@ const scrollRef = useRef(null);
 
     firstPromise
       .then(d => {
+        if (!d?.videos?.length && !navigator.onLine) {
+          // opened with no connection: list the videos we kept while you were online
+          const kept = loadFeedSnapshot().filter(v => isVideoCached(mediaHref(v.videoUrl || v.videoFile) || v.videoUrl)).map(mapVideo);
+          if (kept.length) { setFeedVideos(kept); setActiveIdx(0); setLoading(false); return; }
+        }
         if (typeof d?.seed === 'number') feedSeedRef.current = d.seed;
         const firstBatch = (d?.videos||[]).map(mapVideo);
         feedLoadedCountRef.current = firstBatch.length;
@@ -3910,6 +4002,7 @@ const scrollRef = useRef(null);
           .then(r=>r.ok?r.json():null)
           .then(d2 => {
             const rest = (d2?.videos||[]).map(mapVideo);
+            if (mode !== 'connections') saveFeedSnapshot([...(d?.videos || []), ...(d2?.videos || [])]);
             feedLoadedCountRef.current += rest.length;
             if (rest.length) {
               setFeedVideos(prev => {
@@ -3919,14 +4012,18 @@ const scrollRef = useRef(null);
               });
             }
           }).catch(()=>{});
-            }).catch(()=>{ setFeedVideos([]); });
+            }).catch(()=>{
+              const kept = loadFeedSnapshot().filter(v => isVideoCached(mediaHref(v.videoUrl || v.videoFile) || v.videoUrl)).map(mapVideo);
+              setFeedVideos(kept); setLoading(false);
+            });
   }, [mapVideo]);
 
-  useEffect(() => { if (!feedModeProp) loadFeed('public'); }, [loadFeed, feedModeProp]);
+  useEffect(() => { if (!feedModeProp && !singleVideo) loadFeed('public'); }, [loadFeed, feedModeProp]);
   
 
   const loadingMoreRef = useRef(false);
   const appendMore = useCallback(async () => {
+    if (singleVideo) return false;
     if (loadingMoreRef.current) return false;
     loadingMoreRef.current = true;
     try {
@@ -3971,7 +4068,7 @@ const scrollRef = useRef(null);
     snapFetch(`/snapsa/videos/${commentVideo.id}/comments`)
       .then(r=>r.ok?r.json():null)
       .then(d => {
-        if (d?.comments) setComments(p=>({...p,[commentVideo.id]:d.comments}));
+        if (d?.comments) { setComments(p=>({...p,[commentVideo.id]:d.comments})); setFeedVideos(prev => prev.map(v => v.id === commentVideo.id && (v.comments || 0) < d.comments.length ? { ...v, comments: d.comments.length } : v)); }
       }).catch(()=>{});
   }, [commentVideo?.id]);
 
@@ -3990,9 +4087,13 @@ const scrollRef = useRef(null);
  useEffect(() => { snapFetch('/snapsa/promo/serve').then(r => r.ok ? r.json() : null).then(d => setFeedHasAds(!!d?.ad)).catch(() => {}); }, []);
  const feedSlides = useMemo(() => {
   const out = [];
-  feedVideos.forEach((v, vi) => { out.push({ kind: 'video', v }); if (feedHasAds && (vi + 1) % 5 === 0) out.push({ kind: 'ad', id: 'ad-' + vi }); });
+  feedVideos.forEach((v, vi) => {
+    out.push({ kind: 'video', v });
+    if (!singleVideo && feedHasAds && (vi + 1) % 5 === 0) out.push({ kind: 'ad', id: 'ad-' + vi });
+    if (!singleVideo && vi === 3) out.push({ kind: 'house', id: 'house-ad' });   // Snapsa's own ad, inside the scroll
+  });
   return out;
- }, [feedVideos, feedHasAds]);
+ }, [feedVideos, feedHasAds, singleVideo]);
  const onScroll = useCallback(() => {
   if (!scrollRef.current) return;
   const scrollTop = scrollRef.current.scrollTop;
@@ -4006,20 +4107,22 @@ const scrollRef = useRef(null);
 
 const [isRefreshing, setIsRefreshing] = useState(false);
   useEffect(() => {
-    if (feedModeProp) loadFeed(feedModeProp);
+    if (feedModeProp && !singleVideo) loadFeed(feedModeProp);
   }, [feedModeProp, loadFeed]);
 
   useEffect(() => {
     const h = () => {
+      if (singleVideo) return;
       const el = scrollRef.current;
-      // first tap on Home: go back to the top; only reload when already there
-      if (el && el.scrollTop > 40) { el.scrollTo({ top: 0, behavior: 'smooth' }); return; }
-      handleRefresh();
+      // Home tap: jump to the top AND fetch a fresh feed in the same tap
+      if (el && el.scrollTop > 40) el.scrollTo({ top: 0, behavior: 'smooth' });
+      handleRefreshRef.current?.();
     };
     window.addEventListener('snapsa:refreshFeed', h);
     return () => window.removeEventListener('snapsa:refreshFeed', h);
   }, []);
 
+const handleRefreshRef = useRef(null);
 const handleRefresh = async () => {
   if (isRefreshing) return;
   setIsRefreshing(true);
@@ -4066,6 +4169,7 @@ const handleRefresh = async () => {
     setIsRefreshing(false);
   }
 };
+handleRefreshRef.current = handleRefresh;
 
  // In FeedScreen component, update the scrollToIndex function
 const scrollToIndex = useCallback((index) => {
@@ -4086,7 +4190,6 @@ const scrollToIndex = useCallback((index) => {
     if (!comment.trim()||!commentVideo) return;
     const text = comment.trim(); setComment('');
     const videoId = commentVideo.id;
-    const displayName = `${currentUser?.firstName||''} ${currentUser?.lastName||''}`.trim() || currentUser?.name || 'You';
     try {
       const res = await snapFetch(`/snapsa/videos/${videoId}/comments`, {
         method:'POST', body:JSON.stringify({ content:text }),
@@ -4094,8 +4197,9 @@ const scrollToIndex = useCallback((index) => {
       if (res.ok) {
         const d = await res.json();
         if (d?.comment) {
-          const confirmed = { ...d.comment, _displayName: displayName };
+          const confirmed = { ...d.comment, userId: d.comment.userId || (currentUser?._id || currentUser?.id) };
           setComments(p => ({ ...p, [videoId]: [confirmed, ...(p[videoId]||[])] }));
+          setFeedVideos(prev => prev.map(v => v.id === videoId ? { ...v, comments: (v.comments || 0) + 1 } : v));
         }
       } else {
         showToast?.('Comment failed to post — try again', 'error');
@@ -4130,31 +4234,12 @@ const handleDownload = useCallback((video) => {
     || c.userId?.fullName || c.userId?.name || c.userId?.displayName
     || c.authorName || 'User';
 
-    if (!adWatched) return <SnapsaAdLoader ready={!loading} onDone={markAdWatched}/>;
   if (loading) return (
     <div style={{ width:'100%', height:'100vh', background:'#000', position:'relative', overflow:'hidden' }}>
       
       <div style={{ position:'absolute', inset:0, background:'linear-gradient(180deg, rgba(26,5,51,0.55), #000 65%)' }}/>
 
-      {/* Skeleton action rail — right side, like a real video card's like/comment/share column */}
-      <div style={{ position:'absolute', right:12, bottom:130, display:'flex', flexDirection:'column', gap:22, alignItems:'center' }}>
-        {[46,32,32,32].map((s,i) => (
-          <div key={i} style={{ width:s, height:s, borderRadius:'50%', background:'rgba(255,255,255,0.08)', animation:`ghostPulse 1.6s ease-in-out ${i*0.15}s infinite` }}/>
-        ))}
-      </div>
-
-      {/* Skeleton caption block — bottom-left, like a real video card's author/caption text */}
-      <div style={{ position:'absolute', left:16, right:86, bottom:118, display:'flex', flexDirection:'column', gap:10 }}>
-        <div style={{ width:130, height:14, borderRadius:7, background:'rgba(255,255,255,0.12)', animation:'ghostPulse 1.6s ease-in-out infinite' }}/>
-        <div style={{ width:'72%', height:12, borderRadius:6, background:'rgba(255,255,255,0.08)', animation:'ghostPulse 1.6s ease-in-out .1s infinite' }}/>
-        <div style={{ width:'46%', height:12, borderRadius:6, background:'rgba(255,255,255,0.08)', animation:'ghostPulse 1.6s ease-in-out .2s infinite' }}/>
-      </div>
-
-      {/* Quiet centre mark — small, doesn't dominate the screen the way a spinner does */}
-      <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:10, pointerEvents:'none' }}>
-        <span style={{ fontSize:34, opacity:0.55, animation:'ghostFloat 2.4s ease-in-out infinite' }}>👻</span>
-        <p style={{ color:'rgba(255,255,255,0.35)', fontSize:12.5, fontWeight:600, letterSpacing:'0.02em' }}>Warming up your feed…</p>
-      </div>
+      <FeedLoader />
 
       <style>{`
         @keyframes ghostPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
@@ -4172,6 +4257,7 @@ return (
     }}>
       {/* Lives Strip */}
       <div ref={headerRef} className="snapsa-story-wrap" style={{
+        display: singleVideo ? 'none' : undefined,
         position: 'absolute',
         top: 0,
         left: 0,
@@ -4221,13 +4307,15 @@ return (
         <TransferBars />
       </div>
 
+      {isRefreshing && <div style={{ position:'absolute', top: (singleVideo ? 12 : headerH + 8), left:'50%', transform:'translateX(-50%)', zIndex:30, display:'flex', alignItems:'center', gap:8, padding:'6px 14px', borderRadius:999, background:'rgba(11,11,20,.85)', border:'1px solid rgba(180,76,255,.55)', boxShadow:'0 0 14px rgba(180,76,255,.45)', color:'white', fontSize:12, fontWeight:700, pointerEvents:'none' }}><NeonLoader size={14}/>Refreshing…</div>}
+
       {/* Video feed — starts below the measured header, not a hardcoded guess */}
       <div 
         ref={scrollRef} 
         onScroll={onScroll}
         style={{ 
           position: 'absolute',
-          top: headerH,
+          top: singleVideo ? 0 : headerH,
           left: 0,
           right: 0,
           bottom: 0,
@@ -4239,7 +4327,11 @@ return (
           WebkitOverflowScrolling: 'touch',
         }}
       >
-        {feedSlides.map((slide, i) => slide.kind === 'ad' ? (
+        {feedSlides.map((slide, i) => slide.kind === 'house' ? (
+          <div key={slide.id} style={{ width: '100%', height: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always', position: 'relative', background: '#000', flexShrink: 0 }}>
+            <HouseAdSlide active={i === activeIdx && !overlayOpen && !scrollInProgress} />
+          </div>
+        ) : slide.kind === 'ad' ? (
           <div key={slide.id} style={{ width: '100%', height: '100%', scrollSnapAlign: 'start', scrollSnapStop: 'always', position: 'relative', background: '#000', flexShrink: 0 }}>
             <FeedAdSlide snapFetch={snapFetch} mediaHref={mediaHref} active={i === activeIdx && !overlayOpen && !scrollInProgress} />
           </div>
@@ -4259,6 +4351,7 @@ return (
             {/* Patch 5: Remove muted props from VideoCard in FeedScreen */}
             <VideoCard 
               video={v} 
+              isNear={!overlayOpen && Math.abs(i - activeIdx) <= 1}   // no data is spent on videos while you are on Messages / Posts / Wallet
               isActive={i === activeIdx && !overlayOpen && !scrollInProgress && !viewingStoryGroup} 
               onComment={setCommentVideo} 
               onShare={setShareVideo}
@@ -4609,8 +4702,8 @@ return (
               }
             </div>
             <div style={{ padding:'10px 14px', borderTop:`1px solid ${S.border}`, display:'flex', gap:8, alignItems:'center' }}>
-              <div style={{ width:32, height:32, borderRadius:'50%', background:S.pink, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, fontSize:12 }}>
-                {(currentUser?.firstName||currentUser?.photo||'U')[0].toUpperCase()}
+              <div style={{ width:32, height:32, borderRadius:'50%', background:S.pink, flexShrink:0, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, fontSize:12, overflow:'hidden' }}>
+                {snapsaAvatar ? <img src={mediaHref(snapsaAvatar)} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : (currentUser?.firstName||currentUser?.photo||'U')[0].toUpperCase()}
               </div>
               <input value={comment} onChange={e=>setComment(e.target.value)}
                 onKeyPress={e=>e.key==='Enter'&&handleCommentSubmit()}
@@ -4648,7 +4741,7 @@ return (
                       </div>
                       <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                         <p style={{ color:'rgba(255,255,255,0.95)', fontWeight:700, fontSize:13 }}>{u.name}</p>
-                        <AuthorBadges wernTier={u.tier} snapsaTier={u.snapsaTier} size={12} />
+                        <AuthorBadges wernTier={u.tier} snapsaTier={u.snapsaTier} size={12} crew={u.crew} />
                       </div>
                     </button>
                   ))
@@ -6681,9 +6774,9 @@ const SnapsaMusicPlayer = ({ track, audio = null, videoUrl = null, onClose, onDe
   const showVideo = !!videoUrl && !audioOnly;
   const artStyle = { height:'100%', maxWidth:'100%', aspectRatio:'1/1', borderRadius:26, boxShadow:'0 20px 60px rgba(0,0,0,0.6)', display:'block', objectFit:'cover' };
 
-  return (
+  return createPortal(
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-      style={{ position:'fixed', inset:0, zIndex:200, background:'#04080a', display:'flex', flexDirection:'column' }}>
+      style={{ position:'fixed', inset:0, zIndex:900, background:'#04080a', display:'flex', flexDirection:'column' }}>
       {/* banner (drop /SnapsaPlayerBanner.png into public to use your own; falls back to the logo) */}
       <div style={{ position:'relative', flexShrink:0, background:'#05020a', paddingTop:'env(safe-area-inset-top,0px)' }}>
         <img src="/SnapsaPlayerBanner.png" alt="" style={{ width:'100%', display:'block', maxHeight:140, objectFit:'cover' }}
@@ -6762,7 +6855,8 @@ const SnapsaMusicPlayer = ({ track, audio = null, videoUrl = null, onClose, onDe
       <BottomNav activeTab="music" emberActive
         onTabChange={(id) => { handleClose(); if (id !== 'music') window.dispatchEvent(new CustomEvent('snapsa:navTab', { detail: id })); }}
         onCreatePress={() => { handleClose(); window.dispatchEvent(new CustomEvent('snapsa:openCreate')); }}/>
-    </motion.div>
+    </motion.div>,
+    document.body
   );
 };
 
@@ -8573,6 +8667,7 @@ const UserProfileScreen = ({ profileUser, onBack, onDM, showToast, currentUser }
   const { t: tr } = useLanguage();
   const [safety, setSafety] = useState({ blockedByMe:false, hiddenByMe:false, blockedByThem:false });
   const [showSafety, setShowSafety] = useState(false);
+  const [showOtherShirt, setShowOtherShirt] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const scrollRef = useRef(null);
   useEffect(() => {
@@ -8705,6 +8800,7 @@ const UserProfileScreen = ({ profileUser, onBack, onDM, showToast, currentUser }
         <div ref={scrollRef} onScroll={handleScroll} style={{ flex:1, overflowY:'auto' }}>
           <div style={{ padding:'20px 16px 0' }}>
             <div style={{ display:'flex', alignItems:'center', gap:16, marginBottom:16 }}>
+              <div style={{ position:'relative', flexShrink:0 }}>
               <button
                 onClick={() => userData.avatarUrl && setAvatarFull(true)}
                 style={{ width:72, height:72, borderRadius:'50%', background:S.pink, border:`3px solid ${S.yellow}`, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:900, fontSize:26, color:'white', flexShrink:0, overflow:'hidden', padding:0, cursor: userData.avatarUrl ? 'pointer' : 'default' }}
@@ -8713,14 +8809,18 @@ const UserProfileScreen = ({ profileUser, onBack, onDM, showToast, currentUser }
                   ? <img src={userData.avatarUrl} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
                   : (userData.username||userData.authorName||'S')[0].toUpperCase()}
               </button>
+              {userData.crew && <ShirtFlipButton onClick={() => setShowOtherShirt(true)} />}
+              </div>
               <div>
                 {userData.displayName && <p style={{ fontWeight:800, fontSize:16, color:'white', margin:'0 0 2px', wordBreak:'break-word' }}>{userData.displayName}</p>}
                 <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                   <h2 style={{ fontWeight:900, fontSize:18, color:S.pink }}>@{userData.username||userData.authorName}</h2>
-                  <AuthorBadges wernTier={userData.tier} snapsaTier={userData.snapsaTier} />
+                  <AuthorBadges wernTier={userData.tier} snapsaTier={userData.snapsaTier} crew={userData.crew} />
                 </div>
                 {(userData.official || userData.officialLabel) && <div style={{ margin:'4px 0' }}><OfficialPill label={userData.official || userData.officialLabel} /></div>}
                 {userData.bio && <p style={{ color:S.gray, fontSize:13, marginTop:4, whiteSpace:'pre-wrap' }}>{renderRich(userData.bio)}</p>}
+                <WorkLine work={userData.work} crew={userData.crew} />
+                {showOtherShirt && <CrewShirtModal firstName={(userData.displayName || userData.username || '').split(' ')[0]} position={userData.crew} snapFetch={snapFetch} onClose={() => setShowOtherShirt(false)} />}
                 {userData.countryCode && <div style={{ marginTop:6 }}><CountryTag code={userData.countryCode} name={userData.countryName}/></div>}
                 <div style={{ display:'flex', gap:10, marginTop:12 }}>
                   <button onClick={handleFollow} style={{ padding:'8px 20px', borderRadius:999, fontWeight:700, fontSize:13, cursor:'pointer', background:(following||followState.requested)?'transparent':S.yellow, color:(following||followState.requested)?S.gray:'#000', border:(following||followState.requested)?`1.5px solid ${S.border}`:'none' }}>{following ? 'Following' : (followState.requested ? 'Requested' : '+ Follow')}</button>
@@ -9892,7 +9992,8 @@ const WalletScanner = ({ onResult }) => {
         canvas.height = Math.round(v.videoHeight * scale);
         ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' });
+        if (!_jsQR) ensureJsQR();
+        const code = _jsQR ? _jsQR(img.data, img.width, img.height, { inversionAttempts:'dontInvert' }) : null;
         const parsed = code?.data ? wpParseQr(code.data) : null;
         if (parsed) { stopped = true; cbRef.current(parsed); return; }
       }
@@ -9972,7 +10073,7 @@ const SnapsaWalletBank = ({ data, reload, onClose, showToast }) => {
   useEffect(() => {
     if (sheet !== 'receive' || !w.account.number) return;
     let cancelled = false;
-    QRCode.toDataURL(WP_QR_PREFIX + w.account.number, { margin:1, width:360, color:{ dark:'#10091c', light:'#ffffff' } })
+    import('qrcode').then(m => (m.default || m).toDataURL(WP_QR_PREFIX + w.account.number, { margin:1, width:360, color:{ dark:'#10091c', light:'#ffffff' } }))
       .then(url => { if (!cancelled) setQr(url); })
       .catch(() => { if (!cancelled) setQr(null); });
     return () => { cancelled = true; };
@@ -11406,7 +11507,7 @@ const WalletAdminCardArt = ({ showToast }) => {
 
 const SnapWalletAdminScreen = ({ onClose, showToast }) => {
   const [tab, setTab] = useState('applications');
-  const tabs = [['applications', 'Applications'], ['assign', 'Account numbers'], ['coins', 'Coin transfers'], ['official', 'Official labels'], ['payouts', 'Withdrawals'], ['suspense', 'Unmatched'], ['card', 'Card design'], ['pins', 'PIN changes']];
+  const tabs = [['applications', 'Applications'], ['assign', 'Account numbers'], ['coins', 'Coin transfers'], ['official', 'Official labels'], ['crew', 'Crew'], ['payouts', 'Withdrawals'], ['suspense', 'Unmatched'], ['card', 'Card design'], ['pins', 'PIN changes']];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${S.border}` }}>
@@ -11427,6 +11528,7 @@ const SnapWalletAdminScreen = ({ onClose, showToast }) => {
         {tab === 'assign' && <WalletAdminAssign showToast={showToast} />}
         {tab === 'coins' && <AdminCoinTransfers snapFetch={snapFetch} showToast={showToast} />}
         {tab === 'official' && <AdminOfficial snapFetch={snapFetch} showToast={showToast} />}
+        {tab === 'crew' && <AdminCrew snapFetch={snapFetch} showToast={showToast} />}
         {tab === 'payouts' && <WalletAdminPayouts showToast={showToast} />}
         {tab === 'suspense' && <WalletAdminSuspense />}   
         {tab === 'card' && <WalletAdminCardArt showToast={showToast} />}      
@@ -11459,8 +11561,9 @@ const SnapVisitorsScreen = ({ onClose, showToast }) => {
   const shiftDay = (n) => setDay(prev => { const x = new Date(prev); x.setDate(x.getDate() + n); return startOfDay(x); });
   const timeOf = (iso) => new Date(iso).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
 
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     if (!data) return;
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     doc.setFontSize(20);
     doc.setTextColor(236, 26, 90);
@@ -11569,7 +11672,7 @@ const SnapVisitorsScreen = ({ onClose, showToast }) => {
 };
 
 // Admin dashboard: likes on the Snapsa ad and who liked it most recently.
-const SnapAdsAdminCard = () => {
+const SnapAdsAdminCard = ({ showToast }) => {
   const [ads, setAds] = useState(null);
   useEffect(() => {
     snapFetch('/snapsa/admin/ads').then(r => r.ok ? r.json() : null)
@@ -11790,8 +11893,9 @@ const SnapAdminDashboard = ({ onClose, showToast }) => {
 if (showVisitors) return <SnapVisitorsScreen onClose={() => setShowVisitors(false)} showToast={showToast} />;
   if (showCreators) return <CreatorApprovalsAdminScreen onClose={() => setShowCreators(false)} showToast={showToast} />;
   if (showVerified) return <SnapVerifiedAdminScreen onClose={() => { setShowVerified(false); load(); }} showToast={showToast} />;
-  const downloadPdf = () => {
+  const downloadPdf = async () => {
     if (!stats) return;
+    const { jsPDF } = await import('jspdf');
     const doc = new jsPDF();
     const genDate = new Date(stats.generatedAt).toLocaleString();
 
@@ -11869,7 +11973,7 @@ if (showVisitors) return <SnapVisitorsScreen onClose={() => setShowVisitors(fals
             </div>
 
                         <SnapTreasuryCard />
-            <SnapAdsAdminCard />
+            <SnapAdsAdminCard showToast={showToast} />
  
             <p style={{ color:'white', fontWeight:800, fontSize:15, marginBottom:10 }}>Activity Breakdown</p>
             <div style={{ background:S.card, border:`1px solid ${S.border}`, borderRadius:14, padding:4, marginBottom:20 }}>
@@ -13121,10 +13225,12 @@ const LiveGiftsSection = ({ showToast, currentUser, api, useAuth }) => {
       {/* STORE MODAL */}
       <AnimatePresence>
         {showStore && (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-start justify-center p-4"
+  style={{ zIndex: 1200, paddingTop: 'calc(env(safe-area-inset-top, 0px) + 76px)' }}
   onClick={() => { setShowStore(false); setStoreTab('coins'); setStoreGiftCat('all'); }}
 >
-           <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+           <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="bg-white rounded-2xl w-full max-w-2xl overflow-y-auto"
+              style={{ maxHeight: 'calc(100dvh - env(safe-area-inset-top, 0px) - 100px)' }}
               onClick={e => e.stopPropagation()}
             >
               <div className="sticky top-0 bg-white border-b p-4 flex justify-between items-center z-10">
@@ -14088,10 +14194,13 @@ const HistoryTabContent = ({ currentUser, showToast }) => {
 };
 
 // ─── Dynamic animated cover — moving planets + scrolling brand text + greeting ──
-const DynamicCoverBanner = () => {
+const DynamicCoverBanner = ({ firstName }) => {
   const phrases = ['Snapsa', 'your world', 'all in one place'];
   const [phraseIdx, setPhraseIdx] = useState(0);
   const [showFull, setShowFull] = useState(false);
+  const [greetText, setGreetText] = useState(() => makeGreeting(firstName));
+  const firstNameRef = useRef(firstName);
+  firstNameRef.current = firstName;
 
   useEffect(() => {
     let cancelled = false;
@@ -14099,6 +14208,7 @@ const DynamicCoverBanner = () => {
     const cycle = () => {
       setShowFull(false);
       setPhraseIdx(0);
+      setGreetText(makeGreeting(firstNameRef.current, new Date(), Math.floor(Math.random() * 97)));
       const stepThroughPhrases = (i) => {
         if (cancelled) return;
         setPhraseIdx(i);
@@ -14180,9 +14290,9 @@ const DynamicCoverBanner = () => {
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, x: -100 }}
               transition={{ duration: 0.5 }}
-              style={{ color:'white', fontWeight:900, fontSize:16, letterSpacing:'-0.3px', textShadow:'0 1px 8px rgba(0,0,0,0.85)' }}
+              style={{ color:'white', fontWeight:900, fontSize:14, letterSpacing:'-0.2px', textAlign:'center', padding:'0 14px', textShadow:'0 1px 8px rgba(0,0,0,0.85)' }}
             >
-              Snapsa-  your world, all in one place
+              {greetText}
             </motion.span>
           )}
         </AnimatePresence>
@@ -14206,6 +14316,7 @@ const SnapsaMyVideoTile = ({ v, currentUser, snapsaUsername, snapsaTier, display
   const [visibility, setVisibility] = useState(v.visibility || 'public');
   const [allowDownload, setAllowDownload] = useState(v.allowDownload !== false);
   const [busy, setBusy] = useState(false);
+  const [tileMenu, setTileMenu] = useState(false);
   const vid = v.id || v._id;
 
   const toggleDownload = async (e) => {
@@ -14298,21 +14409,24 @@ const SnapsaMyVideoTile = ({ v, currentUser, snapsaUsername, snapsaTier, display
         </div>
       </button>
 
-      {/* Privacy + delete controls */}
-      <div style={{ position:'absolute', top:4, right:4, display:'flex', gap:4, zIndex:2 }}>
-        <button onClick={togglePrivacy} disabled={busy} title={visibility==='private' ? 'Private — tap to make public' : 'Public — tap to make private'}
-          style={{ width:22, height:22, borderRadius:'50%', background:'rgba(0,0,0,0.55)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          {visibility === 'private' ? <Lock size={11} style={{ color:S.yellow }}/> : <Globe size={11} style={{ color:'white' }}/>}
-        </button>
-        <button onClick={toggleDownload} disabled={busy} title={allowDownload ? 'Downloads on — tap to turn off' : 'Downloads off — tap to turn on'}
-          style={{ width:22, height:22, borderRadius:'50%', background:'rgba(0,0,0,0.55)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
-          <Download size={11} style={{ color: allowDownload ? 'white' : '#ef4444' }}/>
-        </button>
-        <button onClick={handleDelete} disabled={busy} title="Delete video"
-          style={{ width:22, height:22, borderRadius:'50%', background:'rgba(0,0,0,0.55)', border:'none', cursor: busy ? 'default' : 'pointer', display:'flex', alignItems:'center', justifyContent:'center', opacity: busy ? 0.5 : 1 }}>
-          <Trash2 size={11} style={{ color:'white' }}/>
-        </button>
-      </div>
+      {/* One ⋮ button per tile — the privacy / download / delete controls live behind it */}
+      <button onClick={(e) => { e.stopPropagation(); setTileMenu(true); }} aria-label="More" title="More"
+        style={{ position:'absolute', top:4, right:2, zIndex:2, width:24, height:28, background:'none', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center' }}>
+        <MoreVertical size={16} style={{ color:'white', filter:'drop-shadow(0 1px 3px #000)' }}/>
+      </button>
+      {tileMenu && createPortal(
+        <div onClick={() => setTileMenu(false)} style={{ position:'fixed', inset:0, zIndex:650, background:'rgba(0,0,0,.6)', display:'flex', alignItems:'flex-end' }}>
+          <div onClick={e => e.stopPropagation()} style={{ width:'100%', background:'#12061f', borderTop:`1px solid ${S.border}`, borderRadius:'22px 22px 0 0', padding:'14px 16px calc(16px + env(safe-area-inset-bottom,0px))' }}>
+            <p style={{ color:S.gray, fontSize:12, fontWeight:800, letterSpacing:1, margin:'0 0 8px' }}>THIS VIDEO</p>
+            {[
+              [visibility==='private' ? <Lock size={19} style={{ color:S.yellow }}/> : <Globe size={19} style={{ color:'white' }}/>, visibility==='private' ? 'Private — only you. Tap to make public' : 'Public — tap to make private', (e) => { setTileMenu(false); togglePrivacy(e); }],
+              [<Download size={19} style={{ color: allowDownload ? 'white' : '#ef4444' }}/>, allowDownload ? 'Downloads on — tap to turn off' : 'Downloads off — tap to turn on', (e) => { setTileMenu(false); toggleDownload(e); }],
+              [<Trash2 size={19} style={{ color:'#ef4444' }}/>, 'Delete video', (e) => { setTileMenu(false); handleDelete(e); }],
+            ].map(([ic, label, fn], i) => (
+              <button key={i} onClick={fn} style={{ width:'100%', display:'flex', alignItems:'center', gap:14, padding:'13px 6px', background:'none', border:'none', borderTop: i ? `1px solid ${S.border}` : 'none', color: i===2 ? '#ef4444' : 'white', fontSize:15, fontWeight:700, textAlign:'left', cursor:'pointer' }}>{ic}<span>{label}</span></button>
+            ))}
+          </div>
+        </div>, document.body)}
       {visibility === 'private' && (
         <div style={{ position:'absolute', top:4, left:4, background:'rgba(0,0,0,0.55)', borderRadius:6, padding:'2px 6px', display:'flex', alignItems:'center', gap:3 }}>
           <Lock size={9} style={{ color:S.yellow }}/>
@@ -14978,6 +15092,12 @@ const groupMessagesByDate = (messages) => {
 // Delivery receipts: sent = single gray check, delivered = double gray check,
 // read = double pink check (WhatsApp-style, replacing the old moon-phase icons).
 const MsgStatusMoon = ({ status, readAt, onTapRead }) => {
+  if (status === 'listened') {
+    return (
+      <span title="Listened" onClick={onTapRead ? (e) => { e.stopPropagation(); onTapRead(readAt); } : undefined}
+        style={{ display:'inline-flex', color:'#22c55e', cursor: onTapRead ? 'pointer' : 'default' }}><CheckCheck size={14}/></span>
+    );
+  }
   if (status === 'read') {
     return (
       <span
@@ -14993,13 +15113,13 @@ const MsgStatusMoon = ({ status, readAt, onTapRead }) => {
 };
 
 // Small popover shown when tapping a read (✓✓) receipt — "Seen [date] at [time]".
-const SeenAtPopover = ({ readAt, onClose }) => (
+const SeenAtPopover = ({ readAt, listened, voice, onClose }) => (
   <div style={{ position:'fixed', inset:0, zIndex:950, background:'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center' }} onClick={onClose}>
     <div onClick={e=>e.stopPropagation()} style={{ background:S.card, border:`1px solid ${S.border}`, borderRadius:14, padding:'16px 22px', display:'flex', alignItems:'center', gap:10, boxShadow:'0 8px 30px rgba(0,0,0,0.4)' }}>
-      <span style={{ display:'inline-flex', color: S.pink }}><CheckCheck size={18}/></span>
+      <span style={{ display:'inline-flex', color: listened ? '#22c55e' : S.pink }}><CheckCheck size={18}/></span>
       <div>
-        <p style={{ color:'white', fontWeight:700, fontSize:13, margin:0 }}>Seen</p>
-        <p style={{ color:S.gray, fontSize:12.5, margin:0 }}>{formatSeenAt(readAt)}</p>
+        <p style={{ color:'white', fontWeight:700, fontSize:13, margin:0 }}>{listened ? 'Listened to' : (voice ? 'Seen, not listened to yet' : 'Seen')}</p>
+        <p style={{ color:S.gray, fontSize:12.5, margin:0 }}>{formatSeenAt(listened || readAt)}</p>
       </div>
     </div>
   </div>
@@ -15087,6 +15207,10 @@ const OwnProfileScreen = ({
   const [savedVideos, setSavedVideos] = useState([]);
   const [savedLoaded, setSavedLoaded] = useState(false);
   const [savedLoading, setSavedLoading] = useState(false);
+  const [myWork, setMyWork] = useState(null);
+  const [myCrew, setMyCrew] = useState('');
+  const [showWorkEditor, setShowWorkEditor] = useState(false);
+  const [showShirt, setShowShirt] = useState(false);
   const [myFollowCounts, setMyFollowCounts] = useState(null); // { followerCount, followingCount } — live from Snapsa's own DB
   const [showPrivacy, setShowPrivacy] = useState(false);
   const [showDefcon, setShowDefcon] = useState(false);
@@ -15140,30 +15264,9 @@ const OwnProfileScreen = ({
     }
   }, [tab, likedLoaded, likedLoading, savedLoaded, savedLoading]);
 
-  const greeting = useMemo(() => {
-    const now = new Date();
-    const h = now.getHours();
-    const dayName = now.toLocaleDateString(undefined, { weekday: 'long' });
-    const part = h < 5 ? 'Still up' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : h < 22 ? 'Good evening' : 'Good night';
-    const rawFirstName = userData?.firstName || currentUser?.firstName || currentUser?.displayName?.split(' ')[0] || currentUser?.name?.split(' ')[0] || '';
-    const firstName = !isPlaceholderName(rawFirstName) ? rawFirstName : (snapsaUsername || 'there');
-
-    // Rotate through varied closers instead of always "how's your {day} going?"
-    // — seeded by the day of year so it's stable across re-renders/re-mounts
-    // within the same day but actually changes day to day.
-    const closers = [
-      `how's your ${dayName} going?`,
-      `what are you up to today?`,
-      `ready to see what's trending?`,
-      `hope you're having a good one.`,
-      `what's on your feed today?`,
-      `good to see you back.`,
-      `let's see what's new.`,
-      h < 12 ? `how did you sleep?` : h < 18 ? `how's the day treating you?` : `how was your day?`,
-    ];
-    const dayOfYear = Math.floor((now - new Date(now.getFullYear(), 0, 0)) / 86400000);
-    const closer = closers[dayOfYear % closers.length];
-    return `${part}, ${firstName} — ${closer}`;
+  const greetName = useMemo(() => {
+    const raw = userData?.firstName || currentUser?.firstName || currentUser?.displayName?.split(' ')[0] || currentUser?.name?.split(' ')[0] || '';
+    return !isPlaceholderName(raw) ? raw : (snapsaUsername || 'there');
   }, [userData, currentUser, snapsaUsername]);
 
   useEffect(() => {
@@ -15177,6 +15280,8 @@ const OwnProfileScreen = ({
         if (d?.user) {
           setMyCountry(d.user.countryCode ? { code: d.user.countryCode, name: d.user.countryName } : null);
           setInCircle(!!d.user.inCircle);
+          setMyWork(d.user.work || null); setMyCrew(d.user.crew || '');
+          try { window.__snapsaWm = { crew: d.user.crew || '', official: d.user.official || '' }; } catch {}
         }
       })
       .catch(() => {});
@@ -15282,7 +15387,7 @@ const OwnProfileScreen = ({
       </AnimatePresence>
 
       {/* Dynamic animated cover */}
-      <DynamicCoverBanner />
+      <DynamicCoverBanner firstName={greetName} />
 
       {/* Profile header */}
       <div style={{ flexShrink:0, background:S.dark, padding:'0 16px 0', position:'relative', zIndex:2 }}>
@@ -15298,6 +15403,7 @@ const OwnProfileScreen = ({
                 ? <img src={displayPhoto} alt={name} style={{ width:'100%', height:'100%', objectFit:'cover' }}/>
                 : name[0]?.toUpperCase()}
             </button>
+            {myCrew && <ShirtFlipButton onClick={() => setShowShirt(true)} />}
           </div>
 
           {/* Name / username / bio */}
@@ -15319,7 +15425,7 @@ const OwnProfileScreen = ({
                   title="View creator badges & subscription"
                   style={{ background:'none', border:'none', padding:0, cursor:'pointer', display:'inline-flex' }}
                 >
-                  <AuthorBadges wernTier={tier} snapsaTier={snapsaTier} snapsaVerified={isSnapAdmin} size={20} />
+                  <AuthorBadges wernTier={tier} snapsaTier={snapsaTier} snapsaVerified={isSnapAdmin} size={20} crew={myCrew} />
                 </button>
               </div>
               {snapsaOfficial && <div style={{ margin:'4px 0' }}><OfficialPill label={snapsaOfficial} /></div>}
@@ -15330,9 +15436,9 @@ const OwnProfileScreen = ({
                 {snapsaBio || 'Tap to add a bio…'}
               </p>
             </div>
-            <p style={{ color:'rgba(255,255,255,0.65)', fontSize:12, fontWeight:500, marginTop:4, marginBottom:2 }}>
-              {greeting}
-            </p>
+            {!currentUser?.isGuest && <WorkLine work={myWork} crew={myCrew} isSelf onEdit={() => setShowWorkEditor(true)} />}
+            {showWorkEditor && <WorkEditor initial={myWork} snapFetch={snapFetch} showToast={showToast} onClose={() => setShowWorkEditor(false)} onSaved={(w) => { setMyWork(w); if (!w || w.status !== 'approved') setMyCrew(''); }} />}
+            {showShirt && <CrewShirtModal firstName={greetName} position={myCrew} snapFetch={snapFetch} onClose={() => setShowShirt(false)} />}
             
             <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:8, flexWrap:'wrap' }}>
               {myCountry && <CountryTag code={myCountry.code} name={myCountry.name}/>}
@@ -15367,7 +15473,7 @@ const OwnProfileScreen = ({
               )
           ))}
         </div>
-        {showProfileSettings && (
+        {showProfileSettings && createPortal(
           <div onClick={() => setShowProfileSettings(false)} style={{ position:'fixed', inset:0, zIndex:620, background:'rgba(0,0,0,.65)', display:'flex', alignItems:'flex-end' }}>
             <div onClick={e => e.stopPropagation()} style={{ width:'100%', maxHeight:'88vh', overflowY:'auto', background:'#0f0720', borderTop:`1px solid ${S.border}`, borderRadius:'22px 22px 0 0', padding:'16px 16px calc(20px + env(safe-area-inset-bottom,0px))' }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
@@ -15384,7 +15490,8 @@ const OwnProfileScreen = ({
                 <Send size={14}/> Share Snapsa
               </button>
             </div>
-          </div>
+          </div>,
+          document.body
         )}
 
         {/* Tab bar — horizontally scrollable */}
@@ -15506,7 +15613,7 @@ const OwnProfileScreen = ({
       </div>
 
       <AnimatePresence>
-        {showShareModal && <ShareSnapsaModal onClose={()=>setShowShareModal(false)} snapsaUsername={snapsaUsername} name={profileName} avatarUrl={displayPhoto}/>}
+        {showShareModal && <ShareSnapsaCard onClose={()=>setShowShareModal(false)} snapsaUsername={snapsaUsername} name={profileName} avatarUrl={displayPhoto} crewPosition={myCrew} showToast={showToast}/>}
       </AnimatePresence>
     </div>
   );
@@ -15867,7 +15974,7 @@ const SnapVoiceWaveformLive = ({ isRecording, stream }) => {
 
 // ─── Voice notes: playback bubble (play/pause + scrub bar + time),
 // replacing the bare native <audio controls> element ────────────────────
-const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn }) => {
+const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn, listened = false, onListened }) => {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0); // 0-1
@@ -15894,7 +16001,7 @@ const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn }) => {
     const a = audioRef.current;
     if (!a) return;
     if (playing) { a.pause(); setPlaying(false); }
-    else { a.play().catch(()=>{}); setPlaying(true); }
+    else { a.play().catch(()=>{}); setPlaying(true); if (!isOwn) onListened?.(); }
   };
 
   const seek = (e) => {
@@ -15913,7 +16020,7 @@ const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn }) => {
       <audio ref={audioRef} src={src} preload="metadata" style={{ display:'none' }}/>
       <button onClick={toggle} style={{
         width:30, height:30, borderRadius:'50%', flexShrink:0, border:'none', cursor:'pointer',
-        background: isOwn ? 'rgba(255,255,255,0.25)' : S.pink,
+        background: (isOwn && listened) ? '#22c55e' : isOwn ? 'rgba(255,255,255,0.25)' : S.pink,
         display:'flex', alignItems:'center', justifyContent:'center'
       }}>
         {playing ? <Pause size={13} style={{ color:'white' }}/> : <Play size={13} style={{ color:'white', marginLeft:1 }}/>}
@@ -15934,7 +16041,7 @@ const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn }) => {
 };
 
                   
-const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSent, onMessagesRead, isActive = true }) => {
+const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSent, onMessagesRead, isActive = true, onOpenProfile }) => {
   const { t: tr } = useLanguage();
   const [dmSafetyOpen, setDmSafetyOpen] = useState(false);
   const [dmSafety, setDmSafety] = useState({ blockedByMe:false, hiddenByMe:false });
@@ -15956,6 +16063,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
   const [recElapsed, setRecElapsed] = useState(0);
   const [voiceDraft, setVoiceDraft] = useState(null);
   const mediaRef = useRef(null);
+  const bubbleTheme = useBubbleTheme();
   const chatLock = useChatLock(String(chatUser.id || chatUser._id), showToast);
   const [attachOpen, setAttachOpen] = useState(false);
   const [burnNext, setBurnNext] = useState(false);
@@ -15987,7 +16095,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
   useEffect(() => {
     const otherId = chatUser.id || chatUser._id;
     if (!otherId || !isActive) return;
-    const fetchPresence = () => snapFetch(`/snapsa/users/${otherId}/presence`)
+    const fetchPresence = () => document.hidden ? Promise.resolve() : snapFetch(`/snapsa/users/${otherId}/presence`)
       .then(r=>r.ok?r.json():null).then(d=>{ if (d) setPresence(d); }).catch(()=>{});
     fetchPresence();
     const t = setInterval(fetchPresence, 15000);
@@ -16009,7 +16117,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
   useEffect(() => {
     if (!isActive) return;
     load(); scheduleMarkRead();
-    const t = setInterval(() => { load(); }, 4000);
+    const t = setInterval(() => { if (!document.hidden) load(); }, 4000);
     return () => { clearInterval(t); if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current); };
   }, [chatUser?.id, isActive]);
   
@@ -16220,12 +16328,13 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
       {/* HEADER */}
       <div style={{ display:'flex', alignItems:'center', gap:12, padding:'14px 16px 16px', borderBottom:'1px solid rgba(177,0,255,.65)', borderRadius:'0 0 34px 34px', position:'relative', zIndex:1, background:'linear-gradient(180deg, rgba(48,12,84,.92) 0%, rgba(14,8,28,.94) 100%)', backdropFilter:'blur(14px)', boxShadow:'0 6px 26px rgba(160,0,255,.28)' }}>
         <button onClick={onBack} style={{ background:'none', border:'none', cursor:'pointer' }}><ArrowLeft size={20} style={{ color:'white' }}/></button>
-        <div style={{ width:50, height:50, borderRadius:'50%', background:S.pink, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, overflow:'hidden', flexShrink:0, border:'2px solid rgba(200,80,255,.85)', boxShadow:'0 0 14px rgba(180,0,255,.55)' }}>
+        <div role="button" aria-label="View photo" onClick={() => { if (chatUser.avatarUrl) setFullscreenMedia({ url: mediaHref(chatUser.avatarUrl), type:'photo' }); }}
+          style={{ width:50, height:50, borderRadius:'50%', background:S.pink, display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontWeight:700, overflow:'hidden', flexShrink:0, border:'2px solid rgba(200,80,255,.85)', boxShadow:'0 0 14px rgba(180,0,255,.55)', cursor: chatUser.avatarUrl ? 'zoom-in' : 'default' }}>
           {chatUser.avatarUrl
             ? <img src={mediaHref(chatUser.avatarUrl)} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{ e.target.style.display='none'; }}/>
             : isSnapsaOfficial(chatUser)               ? <img src="/SnapsaLogo.png" alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} onError={e=>{ e.target.style.display='none'; }}/>               : chatUser.authorName?.[0]?.toUpperCase()}
         </div>
-        <div>
+        <div role="button" onClick={() => { if (!isSnapsaOfficial(chatUser) && !chatUser?.isSystemAccount) onOpenProfile?.({ ...chatUser, authorId: chatUser.id || chatUser._id, authorName: chatUser.authorName || chatUser.username }); }} style={{ cursor:'pointer', minWidth:0 }}>
           {isSnapsaOfficial(chatUser)             ? <h2 style={{ color:S.pink, fontWeight:800, fontSize:15, letterSpacing:0.6, display:'flex', alignItems:'center', gap:5, margin:0 }}>SNAPSA <SnapsaVerifiedBadge size={16}/></h2>             : <h2 style={{ color:'white', fontWeight:700, fontSize:15 }}>{chatUser.authorName || chatUser.username}</h2>}
           {presence.online
             ? <p style={{ color:'#4ade80', fontWeight:700, fontSize:12.5, margin:0 }}>● Online</p>
@@ -16282,8 +16391,34 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
             );
           }
           const m = entry.m;
+          if (m.type === 'system' && m.callInfo?.kind) {
+            const ci = m.callInfo, mine = m.senderId?.toString() === (currentUser?._id || currentUser?.id)?.toString();
+            const who = chatUser.displayName || chatUser.authorName || chatUser.username || 'They';
+            const vid = ci.callType === 'video', kindWord = vid ? 'video' : 'voice';
+            const dur = ci.duration ? `${String(Math.floor(ci.duration/60)).padStart(2,'0')}:${String(ci.duration%60).padStart(2,'0')}` : '';
+            const bad = ci.kind === 'missed' || ci.kind === 'attempt';
+            const text = ci.kind === 'attempt' ? (mine ? `You tried to call but you were offline` : `${who} tried to call you but they were offline`)
+              : ci.kind === 'missed' ? (mine ? `${kindWord[0].toUpperCase()+kindWord.slice(1)} call · No answer` : `Missed ${kindWord} call`)
+              : ci.kind === 'declined' ? (mine ? `${kindWord[0].toUpperCase()+kindWord.slice(1)} call · Declined` : `Declined ${kindWord} call`)
+              : `${kindWord[0].toUpperCase()+kindWord.slice(1)} call${dur ? ' · ' + dur : ''}`;
+            return (
+              <div key={m._id} style={{ alignSelf:'center', maxWidth:'88%', margin:'6px 0', display:'flex', alignItems:'center', gap:8, padding:'8px 14px', borderRadius:999, background: bad ? 'rgba(239,68,68,.12)' : 'rgba(255,255,255,.07)', border:`1px solid ${bad ? 'rgba(239,68,68,.45)' : 'rgba(255,255,255,.14)'}` }}>
+                {vid ? <Video size={15} style={{ color: bad ? '#f87171' : S.gray, flexShrink:0 }}/> : <Phone size={15} style={{ color: bad ? '#f87171' : S.gray, flexShrink:0 }}/>}
+                <span style={{ color: bad ? '#fca5a5' : 'white', fontSize:13, fontWeight:600 }}>{text}</span>
+                <span style={{ color:S.gray, fontSize:11 }}>{new Date(m.createdAt).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })}</span>
+              </div>
+            );
+          }
+          if (m.type === 'system') return (
+            <div key={m._id} style={{ alignSelf:'center', textAlign:'center', maxWidth:'86%', margin:'8px 0', padding:'12px 16px', borderRadius:16, background:'rgba(255,90,31,.10)', border:'1px solid rgba(255,90,31,.45)' }}>
+              <div style={{ fontSize:26, lineHeight:1 }}>🔥</div>
+              <div style={{ color:'#fff', fontWeight:800, fontSize:13, margin:'6px 0 2px', letterSpacing:.3 }}>THE USER BURNED THEIR IDENTITY</div>
+              <div style={{ color:S.gray, fontSize:12, marginBottom:8 }}>Reopen a new chat with them to talk again.</div>
+              <span style={{ background:'linear-gradient(90deg,#ff5a1f,#ff2d2d)', color:'#fff', fontSize:10.5, fontWeight:900, letterSpacing:.8, padding:'3px 10px', borderRadius:999, boxShadow:'0 0 10px rgba(255,80,30,.5)' }}>DEFCON 1</span>
+            </div>
+          );
           const isOwn = m.senderId?.toString() === (currentUser?._id || currentUser?.id)?.toString();
-          const status = m.status || (m.readAt ? 'read' : m.deliveredAt ? 'delivered' : 'sent');
+          const status = (m.type==='voice' && m.listenedAt) ? 'listened' : (m.status || (m.readAt ? 'read' : m.deliveredAt ? 'delivered' : 'sent'));
           const lockedHide = chatLock.hidden && !(m.deletedForEveryone || m.deletedForMe);
           const isMediaOnly = (m.type === 'photo' || m.type === 'video') && !m.burn && !lockedHide;
           return (
@@ -16299,7 +16434,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
                 style={isMediaOnly
                   ? { position:'relative', borderRadius:12, padding:0, background:'transparent', border:'none', userSelect:'none', touchAction:'pan-y', overflow:'hidden', width:132 }
                   /* Notice we make the card bubble slightly translucent so the background peeks through */
-                  : { position:'relative', background: isOwn?'linear-gradient(135deg,#b100ff 0%,#6a00d9 100%)':'linear-gradient(145deg,rgba(40,32,66,.92),rgba(20,16,34,.92))', borderRadius: isOwn?'22px 22px 6px 22px':'22px 22px 22px 6px', padding:'10px 16px 7px', border: isOwn?'1px solid rgba(225,130,255,.4)':'1px solid rgba(255,255,255,.1)', boxShadow: isOwn?'0 0 18px rgba(170,0,255,.35)':'0 2px 10px rgba(0,0,0,.4)', userSelect:'none', touchAction:'pan-y', backdropFilter: 'blur(8px)' }}>
+                  : { position:'relative', background: isOwn ? bubbleTheme.own : bubbleTheme.other, borderRadius: isOwn?'22px 22px 6px 22px':'22px 22px 22px 6px', padding:'10px 16px 7px', border: isOwn?'1px solid rgba(225,130,255,.4)':'1px solid rgba(255,255,255,.1)', boxShadow: isOwn?'0 0 18px rgba(170,0,255,.35)':'0 2px 10px rgba(0,0,0,.4)', userSelect:'none', touchAction:'pan-y', backdropFilter: 'blur(8px)' }}>
                 {(m.deletedForEveryone || m.deletedForMe) ? (
                   <span style={{ display:'flex', alignItems:'center', gap:6, color:isOwn?'rgba(255,255,255,0.7)':S.gray, fontSize:13.5, fontStyle:'italic' }}>
                     <Trash2 size={13}/>
@@ -16311,8 +16446,23 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
                   <span style={{ color:'white', fontSize:14, fontWeight:800, letterSpacing:.6, display:'flex', alignItems:'center', gap:6, padding:'2px 0 4px' }}>👻 ENCRYPTED</span>
                 ) : (<>
                 {m.replyContext?.kind === 'story_reply' && (
-                  <div style={{ fontSize:11, color:isOwn?'rgba(255,255,255,0.7)':S.gray, marginBottom:4, fontWeight:600 }}>
-                    💬 Replied to your story
+                  <div style={{ margin:'-2px -4px 6px' }}>
+                    <div style={{ fontSize:11, fontWeight:800, color:'#fff', marginBottom:5 }}>
+                      {isOwn ? 'You replied to their story' : 'Replied to your story'}
+                    </div>
+                    <button
+                      onClick={() => m.replyContext?.storyId && window.dispatchEvent(new CustomEvent('snapsa:openStoryById', { detail: { storyId: m.replyContext.storyId, authorId: isOwn ? (chatUser.id || chatUser._id) : currentUser?._id } }))}
+                      style={{ display:'flex', alignItems:'center', gap:8, width:'100%', background:'rgba(0,0,0,0.28)', border:'none', borderBottom:'2px solid #F5A623', borderRadius:10, padding:6, cursor:'pointer', textAlign:'left' }}
+                    >
+                      {m.storySnapshot?.thumbUrl ? (
+                        <img src={mediaHref(m.storySnapshot.thumbUrl)} alt="" style={{ width:42, height:34, objectFit:'cover', borderRadius:6, flexShrink:0 }}/>
+                      ) : (
+                        <div style={{ width:42, height:34, borderRadius:6, background:'rgba(255,255,255,0.12)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
+                          <Sparkles size={14} style={{ color:'rgba(255,255,255,0.55)' }}/>
+                        </div>
+                      )}
+                      <span style={{ fontSize:14, fontWeight:700, color:'#fff', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.storySnapshot?.caption || 'Story'}</span>
+                    </button>
                   </div>
                 )}
                 {m.replyContext?.kind === 'story_reaction' && m.replyContext?.storyId && (
@@ -16365,12 +16515,12 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
                     </div>
                   </button>
                 )}
-                                {!m.burn && m.type==='voice' && <SnapVoiceMessageBubble src={m.mediaUrl} duration={m.duration} isOwn={isOwn}/>}
+                                {!m.burn && m.type==='voice' && <SnapVoiceMessageBubble src={m.mediaUrl} duration={m.duration} isOwn={isOwn} listened={!!m.listenedAt} onListened={() => { if (m.listenedAt) return; m.listenedAt = new Date().toISOString(); snapFetch(`/snapsa/messages/${m._id}/listened`, { method:'POST' }).catch(()=>{}); }}/>}
                 {/* time + read ticks sit inside the bubble (text and voice); photos/videos keep them underneath */}
                 {!isMediaOnly && (
                   <div style={{ display:'flex', justifyContent:'flex-end', alignItems:'center', gap:5, marginTop:3 }}>
                     <span style={{ color:'rgba(255,255,255,.72)', fontSize:11.5 }}>{formatMsgTime(m.createdAt)}</span>
-                    {isOwn && <MsgStatusMoon status={status} readAt={m.readAt} onTapRead={setSeenPopupAt}/>}
+                    {isOwn && <MsgStatusMoon status={status} readAt={m.readAt} onTapRead={() => setSeenPopupAt({ readAt: m.readAt, listenedAt: m.listenedAt, voice: m.type==='voice' })}/>}
                   </div>
                 )}
                 </>)}
@@ -16398,7 +16548,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
               })()}
               <div style={{ display: (isMediaOnly || m.deletedForEveryone || m.deletedForMe) ? 'flex' : 'none', justifyContent: isOwn ? 'flex-end' : 'flex-start', alignItems:'center', gap:5, marginTop: m.reactions?.length ? 10 : 2, padding: isOwn ? '0 2px 0 0' : '0 0 0 2px' }}>
                 <span style={{ color:'rgba(255,255,255,0.35)', fontSize:10, textShadow:'0 1px 2px rgba(0,0,0,0.8)' }}>{formatMsgTime(m.createdAt)}</span>
-                {isOwn && <MsgStatusMoon status={status} readAt={m.readAt} onTapRead={setSeenPopupAt}/>}
+                {isOwn && <MsgStatusMoon status={status} readAt={m.readAt} onTapRead={() => setSeenPopupAt({ readAt: m.readAt, listenedAt: m.listenedAt, voice: m.type==='voice' })}/>}
               </div>
             </div>
           );
@@ -16526,7 +16676,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
         </div>
       )}
       {dmReport && <ReportModal targetType={dmReport.type} targetId={dmReport.id} onClose={()=>setDmReport(null)} showToast={showToast}/>}
-      {seenPopupAt && <SeenAtPopover readAt={seenPopupAt} onClose={()=>setSeenPopupAt(null)}/>}
+      {seenPopupAt && <SeenAtPopover readAt={seenPopupAt.readAt || seenPopupAt} listened={seenPopupAt.listenedAt} voice={!!seenPopupAt.voice} onClose={()=>setSeenPopupAt(null)}/>}
       {fullscreenMedia && <DMMediaViewer media={fullscreenMedia} onClose={()=>setFullscreenMedia(null)} showToast={showToast}/>}
       <ChatLockOverlay lock={chatLock}/>
       <AttachSheet open={attachOpen} onClose={()=>setAttachOpen(false)} onPick={onAttachPick} onNearbyText={onNearbyText} burn={burnNext} setBurn={setBurnNext}/>
@@ -17287,91 +17437,52 @@ const GoLiveScreen = ({ onClose, onStart, currentUser, showToast }) => {
 };
 
 // ─── Home Top Bar ─────────────────────────────────────────────────────
-// Patches 7 & 8: Restore HomeTopBar to original (no mute props, non-clickable logo)
+// A rounded glass card (Stories left · logo centre · Posts right) that sits ABOVE the feed (in the layout, not floating over it),
+// so the lives strip / daily-watch bar / separator line start underneath it.
+const HOME_BAR_H = 70;
 const HomeTopBar = ({ ownAvatar }) => {
   return (
-  <div style={{
-    position:'absolute', top:0, left:0, right:0, zIndex:30, height:96, overflow:'visible',
-    display:'flex', alignItems:'center', justifyContent:'center',
-    padding:'calc(env(safe-area-inset-top, 0px) + 6px) 0 0', pointerEvents:'none',
-  }}>
-    <HeaderStars />
-    {/* Mini universe — moving planets + a shooting star behind the logo */}
-    <div style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
+  <div style={{ position:'relative', flexShrink:0, zIndex:30, height:HOME_BAR_H, boxSizing:'border-box', padding:'calc(env(safe-area-inset-top, 0px) + 6px) 9px 6px', background:'#05020a' }}>
+    <div style={{
+      position:'relative', height:'100%', borderRadius:22, overflow:'hidden', display:'flex', alignItems:'center', justifyContent:'center',
+      border:'1px solid rgba(180,76,255,.28)', background:'linear-gradient(180deg, rgba(70,24,120,.40), rgba(18,8,38,.75))', boxShadow:'inset 0 0 18px rgba(140,60,255,.12)',
+    }}>
+      <HeaderStars />
+      <div style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
+        <div style={{ position:'absolute', width:14, height:14, borderRadius:'50%', top:6, left:'-10%', background:'radial-gradient(circle at 35% 30%, #FF8FB3, #FF2055 60%, #7C0033)', boxShadow:'0 0 8px #FF205577', animation:'topDriftRight 18s linear infinite, planetSelfSpin 7s linear infinite' }}/>
+        <div style={{ position:'absolute', width:2, height:2, top:'20%', left:'10%', background:'white', borderRadius:'50%', boxShadow:'0 0 6px 1px white', animation:'shootingStar 6s linear infinite' }}/>
+        <style>{`
+          @keyframes topDriftRight { from { transform: translateX(0); } to { transform: translateX(140vw); } }
+          @keyframes planetSelfSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+          @keyframes shootingStar { 0% { transform: translate(0,0); opacity:0; } 5% { opacity:1; } 20% { transform: translate(160px, 60px); opacity:0; } 100% { transform: translate(160px, 60px); opacity:0; } }
+        `}</style>
+      </div>
 
-      {Array.from({ length: 14 }).map((_, i) => (
-        <div key={i} style={{
-          position:'absolute',
-          width: 1 + Math.random()*1.5,
-          height: 1 + Math.random()*1.5,
-          borderRadius:'50%',
-          background:'white',
-          opacity: 0.2 + Math.random()*0.5,
-          top: `${Math.random()*100}%`,
-          left: `${Math.random()*100}%`,
-          animation: `twinkleTop ${2+Math.random()*3}s ease-in-out infinite`,
-          animationDelay: `${Math.random()*3}s`,
-        }}/>
-      ))}
-      <div style={{
-        position:'absolute', width:20, height:20, borderRadius:'50%', top:10, left:'-10%',
-        background:'radial-gradient(circle at 35% 30%, #FF8FB3, #FF2055 60%, #7C0033)',
-        boxShadow:'0 0 10px #FF205577',
-        animation:'topDriftRight 18s linear infinite, planetSelfSpin 7s linear infinite',
-      }}/>
-      <div style={{
-        position:'absolute', width:12, height:12, borderRadius:'50%', top:50, right:'-8%',
-        background:'radial-gradient(circle at 35% 30%, #C9B6FF, #7C3AED 60%, #2E1065)',
-        boxShadow:'0 0 8px #7C3AED77',
-        animation:'topDriftLeft 24s linear infinite, planetSelfSpin 10s linear infinite',
-      }}/>
-      <div style={{
-        position:'absolute', width:2, height:2, top:'20%', left:'10%', background:'white', borderRadius:'50%',
-        boxShadow:'0 0 6px 1px white', animation:'shootingStar 6s linear infinite',
-      }}/>
-      <style>{`
-        @keyframes twinkleTop { 0%,100%{opacity:0.15} 50%{opacity:0.7} }
-        @keyframes topDriftRight { from { transform: translateX(0); } to { transform: translateX(140vw); } }
-        @keyframes topDriftLeft  { from { transform: translateX(0); } to { transform: translateX(-140vw); } }
-        @keyframes planetSelfSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-        @keyframes shootingStar {
-          0% { transform: translate(0,0); opacity:0; }
-          5% { opacity:1; }
-          20% { transform: translate(160px, 60px); opacity:0; }
-          100% { transform: translate(160px, 60px); opacity:0; }
-        }
-      `}</style>
-    </div>
-
-    {/* Centred logo — big Snapsa lockup (about 60% of the screen width) */}
-        <div style={{ position:'relative', display:'flex', alignItems:'center', justifyContent:'center', pointerEvents:'none', transform:'translateY(-22px)' }}>
       <img src="/SnapsaHub.png" alt="Snapsa"
-        style={{ width:'60vw', maxWidth:'none', height:'auto', display:'block' }}
+        style={{ position:'relative', height:40, width:'auto', maxWidth:'62%', objectFit:'contain', display:'block', pointerEvents:'none' }}
         onError={e => { e.target.onerror = null; e.target.src = '/SnapsaLogo.png'; }} />
-    </div>
 
-    {/* Left: Stories — opens the Stories screen (watch everyone's stories, create your own) */}
-    <button onClick={() => window.dispatchEvent(new CustomEvent('snapsa:openStories'))} aria-label="Stories"
-      style={{ position:'absolute', left:8, top:'calc(env(safe-area-inset-top, 0px) + 16px)', width:56, pointerEvents:'auto', background:'none', border:'none', padding:0, display:'flex', flexDirection:'column', alignItems:'center', gap:2, cursor:'pointer', zIndex:2 }}>
-      <span style={{ width:34, height:34, borderRadius:'50%', padding:2, background:'linear-gradient(135deg,#FF2D95,#B44CFF,#FFD600)', display:'block' }}>
-        <span style={{ display:'flex', width:'100%', height:'100%', borderRadius:'50%', overflow:'hidden', background:S.dark, alignItems:'center', justifyContent:'center' }}>
-          {ownAvatar ? <img src={ownAvatar} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : <Plus size={14} style={{ color:S.pink }}/>}
+      {/* Left: Stories */}
+      <button onClick={() => window.dispatchEvent(new CustomEvent('snapsa:openStories'))} aria-label="Stories"
+        style={{ position:'absolute', left:8, top:0, bottom:0, width:54, background:'none', border:'none', padding:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:1, cursor:'pointer' }}>
+        <span style={{ width:30, height:30, borderRadius:'50%', padding:2, background:'linear-gradient(135deg,#FF2D95,#B44CFF,#FFD600)', display:'block' }}>
+          <span style={{ display:'flex', width:'100%', height:'100%', borderRadius:'50%', overflow:'hidden', background:S.dark, alignItems:'center', justifyContent:'center' }}>
+            {ownAvatar ? <img src={ownAvatar} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }}/> : <Plus size={12} style={{ color:S.pink }}/>}
+          </span>
         </span>
-      </span>
-      <span style={{ color:'#fff', fontSize:10, fontWeight:800, textShadow:'0 1px 4px #000' }}>Stories</span>
-    </button>
-    {/* Right: Posts — read and write posts */}
-    <button onClick={() => window.dispatchEvent(new CustomEvent('snapsa:openPosts'))} aria-label="Posts"
-      style={{ position:'absolute', right:8, top:'calc(env(safe-area-inset-top, 0px) + 16px)', width:56, pointerEvents:'auto', background:'none', border:'none', padding:0, display:'flex', flexDirection:'column', alignItems:'center', gap:2, cursor:'pointer', zIndex:2 }}>
-      <span style={{ width:34, height:34, borderRadius:'50%', background:'rgba(180,76,255,.18)', border:'1px solid rgba(180,76,255,.5)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-        <ScrollText size={17} style={{ color:'#fff' }}/>
-      </span>
-      <span style={{ color:'#fff', fontSize:10, fontWeight:800, textShadow:'0 1px 4px #000' }}>Posts</span>
-    </button>
+        <span style={{ color:'#fff', fontSize:10, fontWeight:800 }}>Stories</span>
+      </button>
+      {/* Right: Posts */}
+      <button onClick={() => window.dispatchEvent(new CustomEvent('snapsa:openPosts'))} aria-label="Posts"
+        style={{ position:'absolute', right:8, top:0, bottom:0, width:54, background:'none', border:'none', padding:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:1, cursor:'pointer' }}>
+        <span style={{ fontSize:24, lineHeight:'30px', height:30 }}>📜</span>
+        <span style={{ color:'#fff', fontSize:10, fontWeight:800 }}>Posts</span>
+      </button>
+    </div>
   </div>
   );
 };
- 
+
 
 const HeaderStars = React.memo(() => (
   <div className="snapsa-stars" aria-hidden="true">
@@ -17797,6 +17908,14 @@ const SnapsaAppInner = ({ onClose, currentUser, userData, followers=[], followin
   const [showRecord, setShowRecord] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [viewProfile, setViewProfile] = useState(null);
+  useDeepLink(async (u) => {
+    try {
+      const r = await snapFetch(`/snapsa/profile-by-username/${encodeURIComponent(u)}`);
+      const d = r.ok ? await r.json() : null;
+      if (d?.id) { setShowCreate(false); setViewProfile({ authorId: d.id, id: d.id, username: d.username, authorName: d.username }); }
+      else showToast?.('Could not find that profile', 'error');
+    } catch { showToast?.('Could not open that profile', 'error'); }
+  }, !!currentUser?._id);
   const [productStoreTarget, setProductStoreTarget] = useState(null); // {sellerId, productId?, featuringVideoId?}
   // Notifications is now a proper tab — no overlay state needed
   const [dmTarget, setDmTarget] = useState(null);
@@ -18049,6 +18168,70 @@ const snapApiInstance = useRef({
     setActiveTab(id);
   };
 
+  // ── Phone back button + swipe between the bottom tabs ───────────────────────────────────────
+  // Back: closes whatever is open on top (profile, video, chat, Stories / Posts ...), then goes to Home; from Home it leaves the app.
+  const backRef = useRef(() => false);
+  backRef.current = () => {
+    if (quickPlayVideo) { setQuickPlayVideo(null); return true; }
+    if (productStoreTarget) { setProductStoreTarget(null); return true; }
+    if (showRecord) { setShowRecord(false); return true; }
+    if (showUpload) { setShowUpload(false); return true; }
+    if (showCreate) { setShowCreate(false); return true; }
+    if (viewProfile) { setViewProfile(null); return true; }
+    if (showStories) { setShowStories(false); return true; }
+    if (showPosts) { setShowPosts(false); return true; }
+    if (activeTab === 'inbox' && dmTarget) { setDmTarget(null); return true; }
+    if (activeTab !== 'feed') { setActiveTab('feed'); return true; }
+    return false;
+  };
+  useEffect(() => {
+    let on = false, h = null;
+    (async () => {
+      try {
+        const { Capacitor, registerPlugin } = await import('@capacitor/core');
+        if (!Capacitor.isNativePlatform()) return;
+        on = true;
+        const native = registerPlugin('SnapsaRingtone');
+        history.pushState({ snapsa: 1 }, '');
+        h = () => {
+          if (backRef.current()) { history.pushState({ snapsa: 1 }, ''); return; }
+          native.exitApp?.().catch?.(() => {});   // on Home with nothing open: leave the app
+        };
+        window.addEventListener('popstate', h);
+      } catch {}
+    })();
+    return () => { if (h) window.removeEventListener('popstate', h); };
+  }, []);
+
+  // Swipe left / right anywhere on the main screens moves to the next / previous bottom tab
+  const swipeRef = useRef({});
+  swipeRef.current = { activeTab, go: handleTabChange, blocked: !!(showStories || showPosts || viewProfile || showRecord || showUpload || showCreate || quickPlayVideo || productStoreTarget || (activeTab === 'inbox' && dmTarget)) };
+  useEffect(() => {
+    const ORDER = ['feed', 'discover', 'music', 'notifications', 'inbox', 'profile'];
+    let sx = 0, sy = 0, ok = false;
+    const scrollableX = (el) => {
+      for (let n = el; n && n !== document.body; n = n.parentElement) {
+        if (n.dataset?.noswipe) return true;
+        const tag = n.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'CANVAS') return true;
+        const cs = getComputedStyle(n);
+        if ((cs.overflowX === 'auto' || cs.overflowX === 'scroll') && n.scrollWidth > n.clientWidth + 4) return true;
+      }
+      return false;
+    };
+    const ts = (e) => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; ok = e.touches.length === 1 && !swipeRef.current.blocked && !scrollableX(e.target); };
+    const te = (e) => {
+      if (!ok) return; ok = false;
+      const t = e.changedTouches[0]; const dx = t.clientX - sx, dy = t.clientY - sy;
+      if (Math.abs(dx) < 80 || Math.abs(dx) < Math.abs(dy) * 2) return;
+      const i = ORDER.indexOf(swipeRef.current.activeTab); if (i < 0) return;
+      const next = ORDER[i + (dx < 0 ? 1 : -1)]; if (next) swipeRef.current.go(next);
+    };
+    window.addEventListener('touchstart', ts, { passive: true });
+    window.addEventListener('touchend', te, { passive: true });
+    return () => { window.removeEventListener('touchstart', ts); window.removeEventListener('touchend', te); };
+  }, []);
+
   // The full-screen player has its own nav; its taps arrive here.
   useEffect(() => {
     const nav = (e) => { if (e.detail) handleTabChange(e.detail); };
@@ -18084,7 +18267,7 @@ const snapApiInstance = useRef({
       return;
     }
     refreshUnreadCounts();
-    const t = setInterval(refreshUnreadCounts, 15000);
+    const t = setInterval(() => { if (!document.hidden) refreshUnreadCounts(); }, 15000);
     return () => clearInterval(t);
   }, [currentUser?._id, currentUser?.isGuest, refreshUnreadCounts]);
 
@@ -18215,7 +18398,7 @@ useEffect(() => {
           <ScreenErrorBoundary>
           <FeedScreen
             currentUser={currentUser}
-            feedH={feedH}
+            feedH={feedH ? Math.max(0, feedH - HOME_BAR_H) : 0}
             onViewProfile={handleViewProfile}
             showToast={showToast}
             feedMode={feedMode}
@@ -18261,7 +18444,7 @@ useEffect(() => {
             </div>
           ) : dmTarget ? (
             <SnapsaDMScreen currentUser={currentUser} chatUser={dmTarget} onBack={()=>setDmTarget(null)} showToast={showToast}
-              onMessageSent={()=>setInboxRefreshKey(k=>k+1)} onMessagesRead={refreshUnreadCounts} isActive={activeTab==='inbox'}/>
+              onMessageSent={()=>setInboxRefreshKey(k=>k+1)} onMessagesRead={refreshUnreadCounts} isActive={activeTab==='inbox'} onOpenProfile={handleViewProfile}/>
           ) : (
             <DMThreadsScreen currentUser={currentUser} onOpenChat={setDmTarget} refreshKey={inboxRefreshKey} isActive={activeTab==='inbox'}/>
           )}
@@ -18343,8 +18526,8 @@ useEffect(() => {
         </AnimatePresence>
       </div>
 {activeTab !== 'feed' && <TransferBars floating />}
-{showStories && <StoriesScreen onClose={()=>setShowStories(false)} snapFetch={snapFetch} mediaHref={mediaHref} showToast={showToast} currentUser={currentUser} ownAvatar={snapsaAvatar} StoryViewer={StoryViewer} />}
-{showPosts && <PostsScreen onClose={()=>setShowPosts(false)} snapFetch={snapFetch} mediaHref={mediaHref} showToast={showToast} currentUser={currentUser} ownName={snapsaName||('@'+snapsaUsername)} ownAvatar={snapsaAvatar} ownBadges={<AuthorBadges wernTier={currentUser?.tier} snapsaTier={snapsaTier} size={16}/>} renderBadges={(p)=><AuthorBadges wernTier={p.authorTier} snapsaTier={p.authorSnapsaTier} size={14}/>} />}
+{showStories && <StoriesScreen onClose={()=>setShowStories(false)} snapFetch={snapFetch} mediaHref={mediaHref} showToast={showToast} currentUser={currentUser} ownAvatar={snapsaAvatar} StoryViewer={StoryViewer} renderBadge={(g)=><AuthorBadges snapsaTier={g.authorSnapsaTier} size={13}/>} />}
+{showPosts && <PostsScreen onClose={()=>setShowPosts(false)} snapFetch={snapFetch} mediaHref={mediaHref} showToast={showToast} currentUser={currentUser} ownName={snapsaName||snapsaUsername} ownAvatar={snapsaAvatar} ownBadges={<AuthorBadges wernTier={currentUser?.tier} snapsaTier={snapsaTier} size={16}/>} renderBadges={(p)=><AuthorBadges wernTier={p.authorTier} snapsaTier={p.authorSnapsaTier} size={14}/>} />}
 <SnapsaCallHost snapFetch={snapFetch} playPing={playSnapsaPing} showToast={showToast}/>
       <BottomNav activeTab={activeTab} onTabChange={handleTabChange} onCreatePress={()=>setShowCreate(true)}
         unreadNotifCount={unreadNotifCount} unreadMsgCount={unreadMsgCount} offlineMode={offlineMode}/>
@@ -18412,7 +18595,8 @@ useEffect(() => {
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             style={{ position: 'absolute', inset: 0, zIndex: 100 }}
           >
-            <LiveStreamErrorBoundary>
+            <ScreenErrorBoundary>
+              <React.Suspense fallback={<div style={{ width:'100%', height:'100%', background:'#000', display:'flex', alignItems:'center', justifyContent:'center' }}><NeonLoader label="Starting live…"/></div>}>
               <LiveStreamSystem
                 isBroadcaster={true}
                 currentUser={currentUser}
@@ -18421,7 +18605,8 @@ useEffect(() => {
                 channelName={streamChannel}
                 featuredBrand={liveFeaturedBrand ? [liveFeaturedBrand] : null}
               />
-            </LiveStreamErrorBoundary>
+              </React.Suspense>
+            </ScreenErrorBoundary>
           </motion.div>
         )}
         <AnimatePresence>
@@ -18436,16 +18621,13 @@ useEffect(() => {
           <motion.div key="qp" initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
             style={{ position:'fixed', inset:0, zIndex:400, background:'#000' }}>
             <ScreenErrorBoundary>
-            <VideoCard
-              video={quickPlayVideo}
-              isActive={true}
-              onComment={()=>{}}
-              onShare={()=>{}}
-              onShowLikers={()=>{}}
-              onViewProfile={handleViewProfile}
-              onSoundPress={()=>{}}
+            <FeedScreen
+              singleVideo={quickPlayVideo}
               currentUser={currentUser}
-              onAutoScroll={()=>{}}
+              onViewProfile={handleViewProfile}
+              showToast={showToast}
+              overlayOpen={false}
+              onOpenProductStore={setProductStoreTarget}
             />
             </ScreenErrorBoundary>
             <button onClick={()=>setQuickPlayVideo(null)}
@@ -18522,6 +18704,7 @@ export const SnapsaApp = (props) => (
     <SnapsaAppInner {...props}/>
     <AccountRestrictedOverlay/>   
     <VisitTracker/>
+    <DownloadPrompt/>
   </LanguageProvider>
 );
 

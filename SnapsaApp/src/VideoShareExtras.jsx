@@ -4,7 +4,7 @@ import { X, Send, Search, Check } from 'lucide-react';
 
 const C = { pink: '#FF2D95', card: '#150B28', border: 'rgba(180,76,255,0.30)', gray: '#A59BC4' };
 
-export default function SendToChatSheet({ video, snapFetch, snapUrl, showToast, onClose }) {
+export default function SendToChatSheet({ video, snapFetch, snapUrl, showToast, onClose, message, sharedPath, title = 'Send to…' }) {
   const [people, setPeople] = useState(null);
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState({});
@@ -27,8 +27,8 @@ export default function SendToChatSheet({ video, snapFetch, snapUrl, showToast, 
 
   const send = async () => {
     if (!ids.length || busy) return; setBusy(true);
-    const link = `${snapUrl}/snapsa/v/${video.id}`;
-    const text = `🎬 ${video.authorName ? '@' + video.authorName + "'s video" : 'A video'} on Snapsa\n${link}`;
+    const link = video ? `${snapUrl}/snapsa/v/${video.id}` : '';
+    const text = message || `🎬 ${video.authorName ? '@' + video.authorName + "'s video" : 'A video'} on Snapsa\n${link}`;
     let ok = 0;
     for (const id of ids) {
       try {
@@ -36,7 +36,7 @@ export default function SendToChatSheet({ video, snapFetch, snapUrl, showToast, 
         if (r.ok) ok++;
       } catch {}
     }
-    if (ok) snapFetch(`/snapsa/videos/${video.id}/shared`, { method: 'POST', body: JSON.stringify({ count: ok }) }).catch(() => {});
+    if (ok) snapFetch(sharedPath || `/snapsa/videos/${video.id}/shared`, { method: 'POST', body: JSON.stringify({ count: ok }) }).catch(() => {});
     setBusy(false);
     if (ok) { showToast?.(`✅ Sent to ${ok} chat${ok > 1 ? 's' : ''}`, 'success'); onClose(ok); }
     else showToast?.('Could not send. Check your connection', 'error');
@@ -46,7 +46,7 @@ export default function SendToChatSheet({ video, snapFetch, snapUrl, showToast, 
     <div style={{ position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'flex-end' }} onClick={() => onClose(0)}>
       <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column', background: '#12061f', borderTop: `1px solid ${C.border}`, borderRadius: '22px 22px 0 0', padding: '16px 16px calc(14px + env(safe-area-inset-bottom,0px))' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <h3 style={{ margin: 0, color: 'white' }}>Send to…</h3>
+          <h3 style={{ margin: 0, color: 'white' }}>{title}</h3>
           <button onClick={() => onClose(0)} style={{ background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: '50%', padding: 7 }}><X size={16} style={{ color: 'white' }} /></button>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'rgba(255,255,255,.07)', border: `1px solid ${C.border}`, borderRadius: 999, padding: '8px 14px', marginBottom: 10 }}>
