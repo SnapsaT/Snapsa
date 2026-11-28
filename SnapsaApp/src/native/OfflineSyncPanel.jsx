@@ -162,8 +162,8 @@ export default function OfflineSyncPanel({ token }) {
       else if (r?.wantedCount === 0) setStatus('The server returned no videos to save yet.');
       else if (r?.interrupted && r.downloaded === 0) setStatus('Connection lost before anything was saved. Try again when you are online.');
       else if (r?.interrupted) setStatus(`Saved ${r.downloaded}, then the connection dropped. Tap download again to continue.`);
-      else if (r?.failed && r.downloaded === 0) setStatus(`Could not save any video. ${r.lastError || ''}`);
-      else if (r?.failed) setStatus(`Saved ${r.downloaded}, ${r.failed} failed. ${r.lastError || ''}`);
+      else if (r?.failed && r.downloaded === 0) setStatus('Could not save any video. You have lost connection. Try again in a moment.');
+      else if (r?.failed) setStatus(`Saved ${r.downloaded}, ${r.failed} failed. You have lost connection. Tap download again to retry.`);
       else if (r?.downloaded === 0) setStatus('You already have the latest videos. Nothing new to download.');
       else setStatus('Offline videos are ready.');
     } catch (e) {

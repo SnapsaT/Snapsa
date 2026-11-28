@@ -141,7 +141,7 @@ export async function syncOffline({ count, wifiOnly, token, onProgress }) {
           downloaded++; ok2 = true;
           break;
         } catch (e) {
-          lastError = String(e?.message || e).slice(0, 120);
+          lastError = '';   // never keep the technical text (it names the server)
           await deleteFile(id);
         }
       }
