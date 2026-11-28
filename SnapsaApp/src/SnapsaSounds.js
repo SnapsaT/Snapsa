@@ -1,5 +1,5 @@
 // src/SnapsaSounds.js — Snapsa's own chat sounds, synthesised in the app (no audio files to ship).
-// Five unique sounds: drop (message sent), pluck (message arrives in the open chat), rec start, rec cancel, voice-note finished.
+// Five unique sounds: drop (message sent), pluck (message arrives in the open chat), rec start, rec cancel (tech "data purge"), voice-note finished.
 let ctx = null;
 let masterOut = null;
 const off = () => { try { return localStorage.getItem('snapsa_sounds_off') === '1'; } catch { return false; } };
@@ -81,10 +81,13 @@ export const playRecStart = () => run((c) => {
   tone(c, { t: 0.1, f0: 780, f1: 1180, dur: 0.14, vol: 3.0, type: 'triangle' });
 });
 
-/** Recording cancelled — a soft falling sweep with a low thud. */
+/** Recording cancelled — a "data purge": three glitchy digital blips stepping down, then a short power-down sweep. */
 export const playRecCancel = () => run((c) => {
-  tone(c, { f0: 900, f1: 180, dur: 0.3, vol: 3.0, type: 'sawtooth', attack: 0.02 });
-  tone(c, { t: 0.18, f0: 140, f1: 70, dur: 0.16, vol: 3.0 });
+  tone(c, { f0: 1760, dur: 0.05, vol: 1.6, type: 'square', attack: 0.002 });
+  tone(c, { t: 0.07, f0: 1175, dur: 0.05, vol: 1.6, type: 'square', attack: 0.002 });
+  tone(c, { t: 0.14, f0: 587, dur: 0.06, vol: 1.6, type: 'square', attack: 0.002 });
+  tone(c, { t: 0.21, f0: 880, f1: 55, dur: 0.28, vol: 2.2, type: 'sawtooth', attack: 0.004 });
+  tone(c, { t: 0.21, f0: 440, f1: 27, dur: 0.28, vol: 2.0 });
 });
 
 /** Voice note finished playing — three soft bell notes settling down. */

@@ -2,6 +2,8 @@
 // Features: create a group with ANY number of members (even none), text/photo/video/voice/file, replies, anonymous replies,
 // 👻 ghost mode, 🔒 exclusive messages, reactions, delete for everyone, invite code + QR, admins, chat lock, Snapsa sounds.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import VoiceDraft from './VoiceDraft';
 import { ArrowLeft, Plus, Users, Lock, Unlock, Send, Mic, X, Smile, Eye, Reply, Copy, Trash2, Crown, UserMinus, LogOut, Camera, Search, Check, Info, Play, Pause, CheckCheck } from 'lucide-react';
 import { useChatLock, ChatLockOverlay, AttachSheet, FileBubble } from './ChatExtras';
 import { CrewPill } from './CrewKit';
@@ -32,6 +34,7 @@ const Ticks = ({ r, pending }) => {
   if (r.read > 0) return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}><CheckCheck size={14} style={{ opacity: .85 }} /><span style={{ fontSize: 10 }}>{r.read}/{r.total}</span></span>;
   return <Check size={14} style={{ opacity: .7 }} />;
 };
+const cb = { padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1, cursor: 'pointer', flexShrink: 0 };
 const inp = { width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,.07)', border: `1px solid ${C.border}`, borderRadius: 12, padding: '12px 14px', color: 'white', fontSize: 15, outline: 'none', marginBottom: 10 };
 
 /* ───────────── people picker (search) ───────────── */
@@ -93,17 +96,16 @@ export function GroupsBar({ snapFetch, showToast, currentUser, onOpen, refreshKe
   );
 }
 
-const Sheet = ({ title, onClose, children }) => (
-  <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 650, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'flex-end' }}>
-    <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '88vh', overflowY: 'auto', background: '#12061f', borderTop: `1px solid ${C.border}`, borderRadius: '22px 22px 0 0', padding: '16px 16px calc(20px + env(safe-area-inset-bottom,0px))' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+const Sheet = ({ title, onClose, children }) => createPortal(
+  <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,.65)', display: 'flex', alignItems: 'flex-end' }}>
+    <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxHeight: '92vh', overflowY: 'auto', WebkitOverflowScrolling: 'touch', background: '#12061f', borderTop: `1px solid ${C.border}`, borderRadius: '22px 22px 0 0', padding: '16px 16px calc(28px + env(safe-area-inset-bottom,0px))' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, position: 'sticky', top: -16, background: '#12061f', paddingBottom: 6, zIndex: 1 }}>
         <h3 style={{ margin: 0, color: 'white' }}>{title}</h3>
-        <button onClick={onClose} style={{ background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: '50%', padding: 7 }}><X size={16} style={{ color: 'white' }} /></button>
+        <button onClick={onClose} style={{ ...cb, background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: '50%', width: 32, height: 32 }}><X size={16} style={{ color: 'white' }} /></button>
       </div>
       {children}
     </div>
-  </div>
-);
+  </div>, document.body);
 
 function NewGroupSheet({ snapFetch, showToast, me, onClose, onCreated }) {
   const [name, setName] = useState(''), [desc, setDesc] = useState(''), [photo, setPhoto] = useState(null), [prev, setPrev] = useState(null);
@@ -171,7 +173,7 @@ function VoicePlayer({ src, duration, mine }) {
 
 /* ───────────── group info ───────────── */
 function GroupInfo({ snapFetch, showToast, group, me, onClose, onChanged, onLeft }) {
-  const [info, setInfo] = useState(null), [adding, setAdding] = useState(false), [picked, setPicked] = useState({}), [qr, setQr] = useState(null);
+  const [info, setInfo] = useState(null), [adding, setAdding] = useState(false), [picked, setPicked] = useState({}), [qr, setQr] = useState(null), [showQr, setShowQr] = useState(false);
   const [name, setName] = useState(group.name), [desc, setDesc] = useState(group.description || '');
   const photoRef = useRef(null);
   const load = () => snapFetch(`/snapsa/groups/${group.id}`, { cache: 'no-store' }).then(r => r.ok ? r.json() : null).then(d => { if (d) { setInfo(d); setName(d.group.name); setDesc(d.group.description || ''); } });
@@ -196,10 +198,12 @@ function GroupInfo({ snapFetch, showToast, group, me, onClose, onChanged, onLeft
       {admin ? (<><input value={name} onChange={e => setName(e.target.value.slice(0, 40))} style={inp} /><input value={desc} onChange={e => setDesc(e.target.value.slice(0, 200))} placeholder="Description" style={inp} />
         <button onClick={saveText} disabled={name.trim() === g.name && desc === (g.description || '')} style={{ width: '100%', padding: 11, borderRadius: 12, border: 'none', background: 'rgba(255,255,255,.1)', color: 'white', fontWeight: 700, marginBottom: 12, opacity: (name.trim() === g.name && desc === (g.description || '')) ? .4 : 1 }}>Save name &amp; description</button></>)
         : (<><h3 style={{ color: 'white', textAlign: 'center', margin: '0 0 4px' }}>{g.name}</h3>{g.description && <p style={{ color: C.gray, textAlign: 'center', fontSize: 13, margin: '0 0 12px' }}>{g.description}</p>}</>)}
+      <button onClick={leave} style={{ width: '100%', marginTop: 4, marginBottom: 14, padding: 13, borderRadius: 14, border: '1px solid rgba(248,113,113,.5)', background: 'transparent', color: '#f87171', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><LogOut size={17} /> Leave group</button>
       {admin && g.inviteCode && (
         <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 14, marginBottom: 14, textAlign: 'center' }}>
           <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '0 0 8px' }}>INVITE CODE</p>
-          {qr && <img src={qr} alt="" style={{ width: 150, height: 150, borderRadius: 10, background: 'white', padding: 6 }} />}
+          {showQr && qr && <img src={qr} alt="" style={{ width: 150, height: 150, borderRadius: 10, background: 'white', padding: 6 }} />}
+          <button onClick={() => setShowQr(v => !v)} style={{ display: 'block', margin: '0 auto 6px', background: 'none', border: 'none', color: C.pink, fontWeight: 700, fontSize: 13 }}>{showQr ? 'Hide QR code' : 'Show QR code'}</button>
           <p style={{ color: 'white', fontFamily: 'monospace', fontSize: 15, margin: '8px 0', wordBreak: 'break-all' }}>{g.inviteCode}</p>
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => { navigator.clipboard?.writeText(g.inviteCode).then(() => showToast?.('Code copied', 'success')).catch(() => {}); }} style={{ flex: 1, padding: 10, borderRadius: 10, border: 'none', background: grad, color: 'white', fontWeight: 700 }}>Copy code</button>
@@ -223,7 +227,7 @@ function GroupInfo({ snapFetch, showToast, group, me, onClose, onChanged, onLeft
             <button onClick={() => call(`/snapsa/groups/${g.id}/admins/${m.id}`, 'POST', { admin: !m.isAdmin })} title={m.isAdmin ? 'Remove admin' : 'Make admin'} style={{ background: 'rgba(255,255,255,.08)', border: 'none', borderRadius: 10, padding: 8 }}><Crown size={15} style={{ color: m.isAdmin ? '#facc15' : C.gray }} /></button>
             <button onClick={() => window.confirm(`Remove @${m.username}?`) && call(`/snapsa/groups/${g.id}/members/${m.id}`, 'DELETE')} title="Remove" style={{ background: 'rgba(248,113,113,.12)', border: 'none', borderRadius: 10, padding: 8 }}><UserMinus size={15} style={{ color: '#f87171' }} /></button></>)}
         </div>))}
-      <button onClick={leave} style={{ width: '100%', marginTop: 14, padding: 13, borderRadius: 14, border: '1px solid rgba(248,113,113,.5)', background: 'transparent', color: '#f87171', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}><LogOut size={17} /> Leave group</button>
+
     </Sheet>
   );
 }
@@ -235,7 +239,7 @@ export function SnapsaGroupChat({ snapFetch, group: initial, currentUser, showTo
   const [text, setText] = useState(''), [replyTo, setReplyTo] = useState(null), [ghost, setGhost] = useState(false), [ghostReply, setGhostReply] = useState(false);
   const [excl, setExcl] = useState([]), [pickExcl, setPickExcl] = useState(false), [emoji, setEmoji] = useState(false), [attach, setAttach] = useState(false);
   const [seen, setSeen] = useState(null), [menu, setMenu] = useState(null), [info, setInfo] = useState(false), [viewer, setViewer] = useState(null);
-  const [recording, setRecording] = useState(false), [recSecs, setRecSecs] = useState(0);
+  const [voiceDraft, setVoiceDraft] = useState(null), [recording, setRecording] = useState(false), [recSecs, setRecSecs] = useState(0);
   const chatLock = useChatLock(`group_${gid}`, showToast);
   const endRef = useRef(null), tempRef = useRef([]), knownRef = useRef(null), activeRef = useRef(isActive); activeRef.current = isActive;
   const recRef = useRef(null), recT0 = useRef(0), recTimer = useRef(null), recCancel = useRef(false);
@@ -289,7 +293,7 @@ export function SnapsaGroupChat({ snapFetch, group: initial, currentUser, showTo
         stream.getTracks().forEach(t => t.stop());
         const secs = (Date.now() - recT0.current) / 1000;
         if (recCancel.current || secs < 0.7) return;
-        const type = rec.mimeType || 'audio/webm'; send({ file: new File([new Blob(chunks, { type })], `voice.${type.includes('mp4') ? 'm4a' : 'webm'}`, { type }), duration: Math.round(secs) });
+        const type = rec.mimeType || 'audio/webm'; setVoiceDraft({ blob: new Blob(chunks, { type }), ext: type.includes('mp4') ? '.m4a' : '.webm', duration: Math.round(secs) });   // pick a voice effect, then send
       };
       rec._stream = stream; recRef.current = rec; recCancel.current = false;
       playRecStart();                                                   // the blip first, the recorder starts just after so the blip is not in the note
@@ -394,28 +398,30 @@ export function SnapsaGroupChat({ snapFetch, group: initial, currentUser, showTo
         {emoji && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8,1fr)', gap: 2, background: 'rgba(255,255,255,.06)', borderRadius: 12, padding: 6, marginBottom: 6 }}>{EMOJIS.map(e => <button key={e} onClick={() => setText(t => t + e)} style={{ background: 'none', border: 'none', fontSize: 22, padding: 4 }}>{e}</button>)}</div>}
         {recording ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <button onClick={() => endRec(true)} aria-label="Cancel recording" style={{ width: 42, height: 42, borderRadius: '50%', border: 'none', background: 'rgba(248,113,113,.2)' }}><Trash2 size={19} style={{ color: '#f87171' }} /></button>
+            <button onClick={() => endRec(true)} aria-label="Cancel recording" style={{ ...cb, width: 42, height: 42, borderRadius: '50%', border: 'none', background: 'rgba(248,113,113,.2)' }}><Trash2 size={19} style={{ color: '#f87171' }} /></button>
             <div style={{ flex: 1, color: 'white', fontWeight: 700 }}><span style={{ color: '#f87171' }}>●</span> Recording… {Math.floor(recSecs / 60)}:{String(recSecs % 60).padStart(2, '0')}</div>
-            <button onClick={() => endRec(false)} aria-label="Send voice note" style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', background: grad }}><Send size={19} style={{ color: 'white' }} /></button>
+            <button onClick={() => endRec(false)} aria-label="Send voice note" style={{ ...cb, width: 44, height: 44, borderRadius: '50%', border: 'none', background: grad }}><Send size={19} style={{ color: 'white' }} /></button>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6 }}>
-            <button onClick={() => setAttach(true)} aria-label="Attach" style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', flexShrink: 0 }}><Plus size={19} style={{ color: 'white' }} /></button>
-            <button onClick={() => setGhost(g => !g)} title="Ghost mode" style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: ghost ? '#4b3f6b' : 'rgba(255,255,255,.1)', fontSize: 17, flexShrink: 0 }}>👻</button>
-            <button onClick={() => (excl.length ? setExcl([]) : setPickExcl(true))} title="Exclusive message" style={{ width: 38, height: 38, borderRadius: '50%', border: 'none', background: excl.length ? '#7e22ce' : 'rgba(255,255,255,.1)', flexShrink: 0 }}><Eye size={17} style={{ color: 'white' }} /></button>
+            <button onClick={() => setAttach(true)} aria-label="Attach" style={{ ...cb, width: 38, height: 38, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', flexShrink: 0 }}><Plus size={19} style={{ color: 'white' }} /></button>
+            <button onClick={() => setGhost(g => !g)} title="Ghost mode" style={{ ...cb, width: 38, height: 38, borderRadius: '50%', border: 'none', background: ghost ? '#4b3f6b' : 'rgba(255,255,255,.1)', fontSize: 17, flexShrink: 0 }}>👻</button>
+            <button onClick={() => (excl.length ? setExcl([]) : setPickExcl(true))} title="Exclusive message" style={{ ...cb, width: 38, height: 38, borderRadius: '50%', border: 'none', background: excl.length ? '#7e22ce' : 'rgba(255,255,255,.1)', flexShrink: 0 }}><Eye size={17} style={{ color: 'white' }} /></button>
             <textarea value={text} onChange={e => setText(e.target.value)} rows={1} placeholder={ghost || ghostReply ? '👻 Type anonymously…' : excl.length ? 'Exclusive message…' : 'Group message…'}
               style={{ flex: 1, resize: 'none', maxHeight: 110, background: 'rgba(255,255,255,.09)', border: '1px solid transparent', borderRadius: 18, padding: '10px 14px', color: 'white', fontSize: 15, outline: 'none', lineHeight: 1.35 }} />
-            <button onClick={() => setEmoji(v => !v)} aria-label="Emoji" style={{ width: 36, height: 38, background: 'none', border: 'none', flexShrink: 0 }}><Smile size={21} style={{ color: C.gray }} /></button>
-            {canSend ? <button onClick={() => send({ text })} aria-label="Send" style={{ width: 42, height: 42, borderRadius: '50%', border: 'none', background: ghost || ghostReply ? '#4b3f6b' : grad, flexShrink: 0 }}><Send size={18} style={{ color: 'white' }} /></button>
-              : <button onClick={startRec} aria-label="Record voice note" style={{ width: 42, height: 42, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', flexShrink: 0 }}><Mic size={19} style={{ color: 'white' }} /></button>}
+            <button onClick={() => setEmoji(v => !v)} aria-label="Emoji" style={{ ...cb, width: 36, height: 38, background: 'none', border: 'none', flexShrink: 0 }}><Smile size={21} style={{ color: C.gray }} /></button>
+            {canSend ? <button onClick={() => send({ text })} aria-label="Send" style={{ ...cb, width: 42, height: 42, borderRadius: '50%', border: 'none', background: ghost || ghostReply ? '#4b3f6b' : grad, flexShrink: 0 }}><Send size={18} style={{ color: 'white' }} /></button>
+              : <button onClick={startRec} aria-label="Record voice note" style={{ ...cb, width: 42, height: 42, borderRadius: '50%', border: 'none', background: 'rgba(255,255,255,.1)', flexShrink: 0 }}><Mic size={19} style={{ color: 'white' }} /></button>}
           </div>)}
       </div>
 
+      {voiceDraft && createPortal(<VoiceDraft blob={voiceDraft.blob} ext={voiceDraft.ext} duration={voiceDraft.duration}
+        onSend={(file, duration) => { setVoiceDraft(null); send({ file, duration }); }} onDiscard={() => { setVoiceDraft(null); playRecCancel(); }} />, document.body)}
       <ChatLockOverlay lock={chatLock} />
       <AttachSheet open={attach} onClose={() => setAttach(false)} onPick={(f, kind) => send({ file: f, asFile: kind === 'file' })} onNearbyText={() => {}} />
 
-      {menu && (
-        <div onClick={() => setMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 660, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'flex-end' }}>
+      {menu && createPortal(
+        <div onClick={() => setMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 9000, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'flex-end' }}>
           <div onClick={e => e.stopPropagation()} style={{ width: '100%', background: '#12061f', borderRadius: '22px 22px 0 0', padding: '14px 14px calc(18px + env(safe-area-inset-bottom,0px))', border: `1px solid ${C.border}` }}>
             <div style={{ display: 'flex', justifyContent: 'space-around', paddingBottom: 10, borderBottom: `1px solid ${C.border}`, marginBottom: 6 }}>{QUICK.map(e => <button key={e} onClick={() => react(menu, e)} style={{ background: 'none', border: 'none', fontSize: 28 }}>{e}</button>)}</div>
             {[
@@ -425,7 +431,7 @@ export function SnapsaGroupChat({ snapFetch, group: initial, currentUser, showTo
               ...((menu.mine || isAdmin) ? [{ i: <Trash2 size={19} />, t: 'Delete for everyone', f: () => del(menu), red: true }] : []),
             ].map(o => <button key={o.t} onClick={o.f} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '13px 8px', background: 'none', border: 'none', color: o.red ? '#f87171' : 'white', fontSize: 15, fontWeight: 600, textAlign: 'left' }}>{o.i}{o.t}</button>)}
           </div>
-        </div>)}
+        </div>, document.body)}
 
       {pickExcl && (
         <Sheet title="Exclusive message" onClose={() => setPickExcl(false)}>

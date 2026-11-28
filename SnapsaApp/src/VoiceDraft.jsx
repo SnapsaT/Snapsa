@@ -29,7 +29,7 @@ export default function VoiceDraft({ blob, ext = '.webm', duration, onSend, onDi
     <div style={{ position: 'fixed', inset: 0, zIndex: 800, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'flex-end' }}>
       <div style={{ width: '100%', background: '#12061f', borderTop: '1px solid rgba(180,76,255,.5)', borderRadius: '22px 22px 0 0', padding: '18px 16px calc(18px + env(safe-area-inset-bottom,0px))' }}>
         <p style={{ color: 'white', fontWeight: 800, fontSize: 16, margin: '0 0 12px' }}>Voice effect</p>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 6, scrollbarWidth: 'none' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, maxHeight: 150, overflowY: 'auto', paddingBottom: 6, scrollbarWidth: 'none' }}>
           {VOICE_EFFECTS.map(e => (
             <button key={e.id} onClick={() => setFx(e.id)} disabled={busy && fx !== e.id}
               style={{ flexShrink: 0, padding: '8px 14px', borderRadius: 999, border: fx === e.id ? '1.5px solid #ff2d95' : '1px solid rgba(255,255,255,.25)', background: fx === e.id ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.08)', color: 'white', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>

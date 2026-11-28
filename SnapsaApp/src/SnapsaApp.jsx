@@ -44,6 +44,7 @@ import AdminCoinTransfers from './AdminCoinTransfers';
 import AdminOfficial from './AdminOfficial';
 import { OfficialPill } from './PostExtras';
 import { GroupsBar, SnapsaGroupChat } from './SnapsaGroups';
+import { friendlyError, LOST_CONNECTION } from './safeError';
 import AdsTab, { AdminPromoReview, FeedAdSlide } from './AdsTab';
 import { Story3DPhoto, StoryVoicePlayer, StoryStickers } from './StoryExtras';
 import './SnapsaBottomNav.css';
@@ -963,6 +964,10 @@ const snapFetchNetwork = (path, opts = {}) => {
       }).catch(() => {});
     }
     return res;
+  }).catch((err) => {
+    // never pass on the technical text (it can contain the server address)
+    if (err?.name === 'AbortError') throw err;
+    const e = new Error(LOST_CONNECTION); e.code = 'OFFLINE'; throw e;
   });
 };
 // ─── Transfer indicators: upload = blue ↑ bar, download = green ↓ bar ───────────────
@@ -996,7 +1001,7 @@ const snapXhrUploadWithPhase = (path, formData, onProgress) => new Promise((reso
   if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
   xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress?.(Math.min(99, Math.round((e.loaded / e.total) * 100)), 'sending'); };
   xhr.upload.onload = () => onProgress?.(100, 'processing'); // all bytes sent — the server is now preparing the video
-  xhr.onerror = () => reject(new Error('Network error while uploading'));
+  xhr.onerror = () => reject(new Error(LOST_CONNECTION));
   xhr.onload = () => {
     let data = null; try { data = JSON.parse(xhr.responseText); } catch {}
     resolve({ ok: xhr.status >= 200 && xhr.status < 300, status: xhr.status, data });
@@ -4952,7 +4957,7 @@ const DownloadProgressModal = ({ video, onClose, showToast }) => {
           console.log('Download cancelled');
         } else {
           console.error('[Download] Error:', err);
-          setError(err.message || 'Download failed');
+          setError(friendlyError(err.message) || 'Download failed');
           setStatus('Download failed');
           showToast?.('❌ Download failed', 'error');
         }
@@ -15809,9 +15814,6 @@ const DMThreadsScreen = ({ currentUser, onOpenChat, refreshKey, isActive = true 
   const messagesHeader = (
     <div className="snapsa-msg-header" style={{ position:'sticky', top:0, zIndex:2, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'12px 16px', background:S.dark, borderBottom:`1px solid ${S.border}` }}>
       <span style={{ color:'white', fontWeight:800, fontSize:16 }}>{tr('nav.messages')}</span>{threadMenu}<style>{`.snapsa-dm-row{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none}`}</style>
-      <button onClick={refreshThreads} title="Refresh" style={{ background:'none', border:'none', cursor:'pointer', padding:4, display:'flex' }}>
-        <RefreshCw size={18} style={{ color:S.gray }}/>
-      </button>
     </div>
   );
 
@@ -17841,7 +17843,7 @@ const SaveProgressModal = ({ video, snapUrl, authToken, onClose, showToast }) =>
       } catch (err) {
         if (cancelled) return;
         console.error('[Save]', err);
-        setError(err.message || 'Save failed');
+        setError(friendlyError(err.message) || 'Save failed');
         setStatus('Failed');
         showToast?.('❌ Could not save video', 'error');
       }
@@ -17930,7 +17932,9 @@ const sendOutboxItem = (it) => {
   return snapFetch(it.kind === 'story' ? '/snapsa/stories' : `/snapsa/messages/${it.target}`, { method: 'POST', body: fd });
 };
 
-const SnapsaAppInner = ({ onClose, currentUser: currentUserProp, userData, followers=[], following=[], timeline=[], showToast, authToken, api, useAuth }) => {
+const SnapsaAppInner = ({ onClose, currentUser: currentUserProp, userData, followers=[], following=[], timeline=[], showToast: showToastRaw, authToken, api, useAuth }) => {
+  // Never show server addresses or technical network text to people: those become a plain "Network error".
+  const showToast = React.useMemo(() => showToastRaw ? (m, t) => showToastRaw(friendlyError(m), t) : showToastRaw, [showToastRaw]);
   // The signed-in token is the source of truth for "who am I". If the user object carries a different _id
   // (e.g. an old WernTjat id) own videos/chats were treated as someone else's and chat deletes hit the wrong chat.
   const currentUser = React.useMemo(() => {
@@ -18227,6 +18231,10 @@ const snapApiInstance = useRef({
     
     if (id === 'feed' && activeTab === 'feed') {
       window.dispatchEvent(new CustomEvent('snapsa:refreshFeed'));
+      return;
+    }
+    if (id === 'inbox' && activeTab === 'inbox' && !dmTarget && !groupTarget) {   // tap Messages again → refresh the list
+      setInboxRefreshKey(k => k + 1); window.dispatchEvent(new CustomEvent('snapsa:groupUpdate', { detail: {} })); refreshUnreadCounts?.();
       return;
     }
     if (id === 'inbox') { setDmTarget(null); setGroupTarget(null); } // always land on the chats list, not a stale open thread

@@ -1,8 +1,10 @@
 // src/PostsScreen.jsx — opened by the "posts" button on the feed: read other people's posts and write your own.
 // Composer = the WernPost composer: modes, Media/Camera/Annotate, Tag, Place, Feel, Mood, Song, Poll, Q&A and timed Burn.
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Heart, MessageCircle, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
+import { Download, ArrowLeft, Heart, MessageCircle, BarChart3, Share2, Image as ImageIcon, Camera, Smile, Send, X, MoreVertical, Trash2, MapPin, Users, Flame, BarChart3, HelpCircle, Music, Type, Zap } from 'lucide-react';
 import { timeAgo } from './StoryShared';
+import { renderPostCard } from './postCardImage';
+import { saveBlobToDevice } from './native/saveMedia';
 import { CrewPill } from './CrewKit';
 import { SponsoredCard } from './AdsTab';
 import SendToChatSheet from './VideoShareExtras';
@@ -25,6 +27,19 @@ function Avatar({ url, name, mediaHref, size = 40 }) {
 
 function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToast, onLike, onOpenComments, onShare, onDelete, onGone, onPoll }) {
   const [menu, setMenu] = useState(false);
+  const [savingCard, setSavingCard] = useState(false);
+  // Save post card: draws the whole post (name, badges, time, place, caption, photo, counts) as a picture and puts it in the Gallery
+  const saveCard = async () => {
+    if (savingCard) return;
+    if (p.burned) { showToast?.('This post cannot be saved', 'info'); return; }
+    setSavingCard(true); showToast?.('Making the post card…', 'info');
+    try {
+      const blob = await renderPostCard(p, { mediaHref, timeText: timeAgo(p.createdAt) });
+      const r = await saveBlobToDevice(blob, `snapsa_post_${Date.now()}.png`);
+      if (!r?.cancelled) showToast?.(`✅ Post card saved${r?.where ? ' to ' + r.where : ''}`, 'success');
+    } catch { showToast?.('Could not save the post card. Try again.', 'error'); }
+    setSavingCard(false);
+  };
   const vibeLabel = (VIBES.find(v => v[0] === p.vibe) || VIBES[0])[1];
   const icon = { background: 'none', border: 'none', color: C.gray, display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, cursor: 'pointer', padding: 0 };
   return (
@@ -45,8 +60,9 @@ function PostCard({ p, mediaHref, renderBadges, onOpenMedia, snapFetch, showToas
           <button onClick={() => setMenu(v => !v)} aria-label="More" style={{ background: 'none', border: 'none', color: C.gray, padding: 4, cursor: 'pointer' }}><MoreVertical size={20} /></button>
           {menu && <>
             <div onClick={() => setMenu(false)} style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
-            <div style={{ position: 'absolute', right: 0, top: 30, zIndex: 21, minWidth: 150, background: '#1b0d33', border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,.5)' }}>
+            <div style={{ position: 'absolute', right: 0, top: 30, zIndex: 21, minWidth: 190, background: '#1b0d33', border: `1px solid ${C.border}`, borderRadius: 12, overflow: 'hidden', boxShadow: '0 8px 24px rgba(0,0,0,.5)' }}>
               <button onClick={() => { setMenu(false); onShare(p); }} style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '12px 14px', background: 'none', border: 'none', color: 'white', fontWeight: 700, textAlign: 'left' }}><Share2 size={16} /> Share</button>
+              <button onClick={() => { setMenu(false); saveCard(); }} style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '12px 14px', background: 'none', border: 'none', borderTop: `1px solid ${C.border}`, color: 'white', fontWeight: 700, textAlign: 'left' }}><Download size={16} /> Save post card</button>
               {p.own && <button onClick={() => { setMenu(false); onDelete(p); }} style={{ display: 'flex', gap: 8, alignItems: 'center', width: '100%', padding: '12px 14px', background: 'none', border: 'none', borderTop: `1px solid ${C.border}`, color: '#f87171', fontWeight: 700, textAlign: 'left' }}><Trash2 size={16} /> Delete post</button>}
             </div>
           </>}
