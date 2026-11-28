@@ -11,8 +11,8 @@ const getOut = (c) => {
   const comp = c.createDynamicsCompressor();
   comp.threshold.value = -8;
   comp.knee.value = 12;
-  comp.ratio.value = 6;
-  comp.attack.value = 0.003;
+  comp.ratio.value = 8;
+  comp.attack.value = 0.002;
   comp.release.value = 0.12;
   comp.connect(c.destination);
   masterOut = comp;
@@ -38,7 +38,7 @@ if (typeof window !== 'undefined') {
 }
 
 // one tone: frequency glide f0 -> f1, soft attack, exponential fade
-const tone = (c, { t = 0, f0, f1 = f0, dur = 0.25, vol = 1.5, type = 'sine', attack = 0.006, out }) => {
+const tone = (c, { t = 0, f0, f1 = f0, dur = 0.25, vol = 3.0, type = 'sine', attack = 0.006, out }) => {
   const dest = out || getOut(c);
   const o = c.createOscillator(), g = c.createGain(), t0 = c.currentTime + t;
   o.type = type;
@@ -62,36 +62,36 @@ const run = (fn) => { if (off()) return; const c = getCtx(); if (!c) return; try
 /** Message sent (first check) — a water drop: a bright "plip" that falls, then a small ripple. */
 export const playSent = () => run((c) => {
   const bus = echo(c);
-  tone(c, { f0: 1500, f1: 420, dur: 0.18, vol: 1.5, out: bus });
-  tone(c, { t: 0.07, f0: 2400, f1: 900, dur: 0.1, vol: 1.5, out: bus });
-  tone(c, { t: 0.16, f0: 760, f1: 520, dur: 0.14, vol: 1.5, out: bus });
+  tone(c, { f0: 1500, f1: 420, dur: 0.18, vol: 3.0, out: bus });
+  tone(c, { t: 0.07, f0: 2400, f1: 900, dur: 0.1, vol: 3.0, out: bus });
+  tone(c, { t: 0.16, f0: 760, f1: 520, dur: 0.14, vol: 3.0, out: bus });
 });
 
 /** Message arrives while the chat is open — a two-note glassy pluck, going up. */
 export const playIncoming = () => run((c) => {
   const bus = echo(c);
-  tone(c, { f0: 784, dur: 0.22, vol: 2.0, type: 'triangle', out: bus });
-  tone(c, { f0: 1175, t: 0.11, dur: 0.32, vol: 2.0, type: 'triangle', out: bus });
-  tone(c, { f0: 2350, t: 0.11, dur: 0.18, vol: 2.0, type: 'triangle', out: bus });
+  tone(c, { f0: 784, dur: 0.22, vol: 3.0, type: 'triangle', out: bus });
+  tone(c, { f0: 1175, t: 0.11, dur: 0.32, vol: 3.0, type: 'triangle', out: bus });
+  tone(c, { f0: 2350, t: 0.11, dur: 0.18, vol: 3.0, type: 'triangle', out: bus });
 });
 
 /** Recording starts — a quick rising "blip-blip". */
 export const playRecStart = () => run((c) => {
-  tone(c, { f0: 520, f1: 780, dur: 0.1, vol: 1.5, type: 'triangle' });
-  tone(c, { t: 0.1, f0: 780, f1: 1180, dur: 0.14, vol: 1.5, type: 'triangle' });
+  tone(c, { f0: 520, f1: 780, dur: 0.1, vol: 3.0, type: 'triangle' });
+  tone(c, { t: 0.1, f0: 780, f1: 1180, dur: 0.14, vol: 3.0, type: 'triangle' });
 });
 
 /** Recording cancelled — a soft falling sweep with a low thud. */
 export const playRecCancel = () => run((c) => {
-  tone(c, { f0: 900, f1: 180, dur: 0.3, vol: 1.5, type: 'sawtooth', attack: 0.02 });
-  tone(c, { t: 0.18, f0: 140, f1: 70, dur: 0.16, vol: 1.5 });
+  tone(c, { f0: 900, f1: 180, dur: 0.3, vol: 3.0, type: 'sawtooth', attack: 0.02 });
+  tone(c, { t: 0.18, f0: 140, f1: 70, dur: 0.16, vol: 3.0 });
 });
 
 /** Voice note finished playing — three soft bell notes settling down. */
 export const playVoiceEnd = () => run((c) => {
   const bus = echo(c);
-  tone(c, { f0: 1319, dur: 0.34, vol: 1.5, out: bus });
-  tone(c, { t: 0.14, f0: 988, dur: 0.34, vol: 1.5, out: bus });
-  tone(c, { t: 0.28, f0: 659, dur: 0.5, vol: 1.5, out: bus });
-  tone(c, { t: 0.28, f0: 1318, dur: 0.3, vol: 1.5, out: bus });
+  tone(c, { f0: 1319, dur: 0.34, vol: 3.0, out: bus });
+  tone(c, { t: 0.14, f0: 988, dur: 0.34, vol: 3.0, out: bus });
+  tone(c, { t: 0.28, f0: 659, dur: 0.5, vol: 3.0, out: bus });
+  tone(c, { t: 0.28, f0: 1318, dur: 0.3, vol: 3.0, out: bus });
 });
