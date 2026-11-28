@@ -5,7 +5,7 @@ import wasm from 'vite-plugin-wasm';
 import topLevelAwait from 'vite-plugin-top-level-await';
 
 // https://vitejs.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     wasm(),
@@ -20,12 +20,12 @@ export default defineConfig({
     port: 4040,
     host: true,
     allowedHosts: ['snapsa-ahdb.onrender.com'],
-  }, 
+  },
   preview: {
-  host: true,             // ← ADD THIS
-  port: 4173,             // ← Good to be explicit
-  allowedHosts: ['snapsa-ahdb.onrender.com'],
-},
+    host: true,
+    port: 4173,
+    allowedHosts: ['snapsa-ahdb.onrender.com'],
+  },
   build: {
     outDir: 'dist',
     sourcemap: false,   // maps are never used by the app, and they were being packed into the APK
@@ -42,5 +42,6 @@ export default defineConfig({
   },
   // Ensure WASM files are treated as assets
   assetsInclude: ['**/*.wasm'],
-  // ❌ The manually hardcoded 'define' block has been removed 
-});
+  // Real builds: every console.log / debugger is stripped out, so nothing (addresses, tokens, debug text) is ever printed by the app
+  esbuild: mode === 'production' ? { drop: ['console', 'debugger'], legalComments: 'none' } : {},
+}));
