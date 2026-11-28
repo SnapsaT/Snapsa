@@ -19,10 +19,10 @@ export default defineConfig({
   server: {
     port: 4040,
     host: true,
-    allowedHosts: ['snapsa.onrender.com'],
+    allowedHosts: ['snapsa-ahdb.onrender.com'],
   },
   preview: {
-    allowedHosts: ['snapsa.onrender.com'],
+    allowedHosts: ['snapsa-ahdb.onrender.com'],
   },
   build: {
     outDir: 'dist',
