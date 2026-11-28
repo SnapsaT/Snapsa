@@ -224,7 +224,7 @@ export function AttachSheet({ open, onClose, onPick, onNearbyText, burn, setBurn
     { l: 'Camera', I: Camera, g: 'linear-gradient(135deg,#ef4444,#f97316)', fn: () => camRef.current?.click() },
     { l: 'Files', I: FileText, g: 'linear-gradient(135deg,#f59e0b,#eab308)', fn: () => fileRef.current?.click() },
     { l: 'Songs', I: Music, g: 'linear-gradient(135deg,#10b981,#14b8a6)', fn: () => audioRef.current?.click() },
-    { l: burn ? 'Burn: ON' : 'Burn after read', I: Flame, g: burn ? 'linear-gradient(135deg,#f59e0b,#dc2626)' : 'linear-gradient(135deg,#78350f,#7f1d1d)', fn: () => { setBurn(!burn); } },
+    ...(setBurn ? [{ l: burn ? 'Burn: ON' : 'Burn after read', I: Flame, g: burn ? 'linear-gradient(135deg,#f59e0b,#dc2626)' : 'linear-gradient(135deg,#78350f,#7f1d1d)', fn: () => { setBurn(!burn); } }] : []),
   ];
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 700, background: 'rgba(0,0,0,.6)', display: 'flex', alignItems: 'flex-end' }} onClick={onClose}>

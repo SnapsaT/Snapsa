@@ -10,7 +10,7 @@ const left = (d) => { const ms = new Date(d) - Date.now(); return ms <= 0 ? '' :
 export function SponsoredCard({ snapFetch, mediaHref = (u) => u }) {
   const [ad, setAd] = useState(null);
   const ref = useRef(null), counted = useRef(false);
-  useEffect(() => { snapFetch('/snapsa/promo/serve').then(r => r.ok ? r.json() : null).then(d => setAd(d?.ad || null)).catch(() => {}); }, []);
+  useEffect(() => { snapFetch('/snapsa/promo/serve?placement=post').then(r => r.ok ? r.json() : null).then(d => setAd(d?.ad || null)).catch(() => {}); }, []);
   useEffect(() => {
     if (!ad || !ref.current || typeof IntersectionObserver === 'undefined') return;
     const io = new IntersectionObserver(([e]) => { if (e.isIntersecting && !counted.current) { counted.current = true; snapFetch(`/snapsa/promo/${ad.id}/impression`, { method: 'POST' }).catch(() => {}); } }, { threshold: 0.5 });
@@ -37,7 +37,7 @@ export function SponsoredCard({ snapFetch, mediaHref = (u) => u }) {
 export function FeedAdSlide({ snapFetch, mediaHref = (u) => u, active }) {
   const [ad, setAd] = useState(null);
   const counted = useRef(false), vref = useRef(null);
-  useEffect(() => { snapFetch('/snapsa/promo/serve').then(r => r.ok ? r.json() : null).then(d => setAd(d?.ad || null)).catch(() => {}); }, []);
+  useEffect(() => { snapFetch('/snapsa/promo/serve?placement=video').then(r => r.ok ? r.json() : null).then(d => setAd(d?.ad || null)).catch(() => {}); }, []);
   useEffect(() => { if (active && ad && !counted.current) { counted.current = true; snapFetch(`/snapsa/promo/${ad.id}/impression`, { method: 'POST' }).catch(() => {}); } }, [active, ad]);
   useEffect(() => { const v = vref.current; if (!v) return; if (active) v.play?.().catch(() => {}); else v.pause?.(); }, [active, ad]);
   const go = () => { if (!ad) return; snapFetch(`/snapsa/promo/${ad.id}/click`, { method: 'POST' }).catch(() => {}); if (ad.ctaUrl) window.open(ad.ctaUrl, '_blank', 'noopener'); };
@@ -57,11 +57,44 @@ export function FeedAdSlide({ snapFetch, mediaHref = (u) => u, active }) {
   );
 }
 
+// A full-screen sponsored slide that plays between people's stories (never listed in the Stories screen).
+export function StoryAdSlide({ ad, snapFetch, mediaHref = (u) => u, onDone, onClose }) {
+  const [pct, setPct] = useState(0);
+  const vref = useRef(null);
+  const ms = ad.mediaType === 'video' ? 15000 : 6000;
+  useEffect(() => { snapFetch(`/snapsa/promo/${ad.id}/impression`, { method: 'POST' }).catch(() => {}); }, [ad.id]);
+  useEffect(() => {
+    const t0 = Date.now(); let raf;
+    const tick = () => { const p = Math.min(100, ((Date.now() - t0) / ms) * 100); setPct(p); if (p >= 100) onDone?.(); else raf = requestAnimationFrame(tick); };
+    raf = requestAnimationFrame(tick); return () => cancelAnimationFrame(raf);
+  }, [ad.id]);
+  const go = (e) => { e.stopPropagation(); snapFetch(`/snapsa/promo/${ad.id}/click`, { method: 'POST' }).catch(() => {}); if (ad.ctaUrl) window.open(ad.ctaUrl, '_blank', 'noopener'); };
+  return (
+    <div onClick={() => onDone?.()} style={{ position: 'fixed', inset: 0, zIndex: 700, background: '#000', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ position: 'absolute', top: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 8px)', left: 10, right: 10, height: 3, background: 'rgba(255,255,255,.25)', borderRadius: 3, zIndex: 3 }}>
+        <div style={{ width: pct + '%', height: '100%', background: '#fff', borderRadius: 3 }} />
+      </div>
+      {ad.mediaUrl && (ad.mediaType === 'video'
+        ? <video ref={vref} src={mediaHref(ad.mediaUrl)} autoPlay muted playsInline onEnded={() => onDone?.()} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />
+        : <img src={mediaHref(ad.mediaUrl)} alt="" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain' }} />)}
+      <div style={{ position: 'absolute', top: 'calc(var(--sat, env(safe-area-inset-top, 0px)) + 18px)', left: 14, right: 14, display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 3 }}>
+        <span style={{ background: 'rgba(255,255,255,.2)', color: 'white', fontSize: 10.5, fontWeight: 800, letterSpacing: 1.2, padding: '3px 9px', borderRadius: 999 }}>SPONSORED{ad.ownerName ? ` · @${ad.ownerName}` : ''}</span>
+        <button onClick={(e) => { e.stopPropagation(); onClose?.(); }} aria-label="Close" style={{ background: 'rgba(0,0,0,.5)', border: 'none', borderRadius: '50%', padding: 7 }}><X size={18} style={{ color: 'white' }} /></button>
+      </div>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: '60px 18px calc(28px + env(safe-area-inset-bottom,0px))', background: 'linear-gradient(transparent,rgba(0,0,0,.88))', zIndex: 3 }}>
+        <p style={{ color: 'white', fontWeight: 800, fontSize: 19, margin: '0 0 4px' }}>{ad.title}</p>
+        {ad.text && <p style={{ color: '#e9e2ff', fontSize: 14, margin: '0 0 12px', lineHeight: 1.45 }}>{ad.text}</p>}
+        {ad.ctaUrl && <button onClick={go} style={{ width: '100%', padding: 14, borderRadius: 14, border: 'none', background: 'linear-gradient(135deg,#8b2cf5,#ff2d95)', color: 'white', fontWeight: 800, fontSize: 15 }}>{ad.ctaLabel || 'Learn more'}</button>}
+      </div>
+    </div>
+  );
+}
+
 export default function AdsTab({ snapFetch, showToast, coins = 0, onCoins }) {
   const [ads, setAds] = useState(null);
   const [plans, setPlans] = useState([]);
   const [creating, setCreating] = useState(false);
-  const [f, setF] = useState({ title: '', text: '', ctaLabel: 'Learn more', ctaUrl: '', days: 7 });
+  const [f, setF] = useState({ title: '', text: '', ctaLabel: 'Learn more', ctaUrl: '', days: 7, placement: 'video' });
   const [file, setFile] = useState(null), [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
   const fileRef = useRef(null);
@@ -79,10 +112,10 @@ export default function AdsTab({ snapFetch, showToast, coins = 0, onCoins }) {
     try {
       const fd = new FormData();
       if (file) fd.append('media', file);
-      Object.entries({ title: f.title, text: f.text, ctaLabel: f.ctaLabel, ctaUrl: f.ctaUrl, days: f.days }).forEach(([k, v]) => fd.append(k, v));
+      Object.entries({ title: f.title, text: f.text, ctaLabel: f.ctaLabel, ctaUrl: f.ctaUrl, days: f.days, placement: f.placement }).forEach(([k, v]) => fd.append(k, v));
       const r = await snapFetch('/snapsa/promo', { method: 'POST', body: fd });
       const d = await r.json().catch(() => ({}));
-      if (r.ok) { showToast?.('✅ Ad sent for review. It goes live once approved', 'success'); onCoins?.(d.newBalance); setCreating(false); setF({ title: '', text: '', ctaLabel: 'Learn more', ctaUrl: '', days: 7 }); setFile(null); setPreview(null); load(); }
+      if (r.ok) { showToast?.('✅ Ad sent for review. It goes live once approved', 'success'); onCoins?.(d.newBalance); setCreating(false); setF({ title: '', text: '', ctaLabel: 'Learn more', ctaUrl: '', days: 7, placement: 'video' }); setFile(null); setPreview(null); load(); }
       else showToast?.(d.error || 'Could not create the ad', 'error');
     } catch { showToast?.('You need to be online', 'error'); }
     setBusy(false);
@@ -101,7 +134,16 @@ export default function AdsTab({ snapFetch, showToast, coins = 0, onCoins }) {
         <button onClick={() => setCreating(false)} style={{ background: 'rgba(255,255,255,.1)', border: 'none', borderRadius: '50%', padding: 7 }}><X size={16} style={{ color: 'white' }} /></button>
       </div>
 
-      <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '0 0 8px' }}>1 · HOW LONG SHOULD IT RUN?</p>
+      <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '0 0 8px' }}>1 · WHERE SHOULD IT SHOW?</p>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 16 }}>
+        {[['story', '📖', 'Ad as Story', 'Full screen, between people\'s stories'], ['post', '📝', 'Ad as Post', 'A card inside the Posts feed'], ['video', '🎬', 'Ad as Video', 'Full screen in the video feed']].map(([k, ic, t, d]) => (
+          <button key={k} onClick={() => setF(x => ({ ...x, placement: k }))} style={{ padding: '12px 6px', borderRadius: 14, border: f.placement === k ? '1.5px solid #fff' : `1px solid ${C.border}`, background: f.placement === k ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.05)', color: 'white', textAlign: 'center' }}>
+            <span style={{ display: 'block', fontSize: 22 }}>{ic}</span>
+            <span style={{ display: 'block', fontWeight: 800, fontSize: 13, marginTop: 2 }}>{t}</span>
+            <span style={{ display: 'block', fontSize: 10.5, opacity: .8, marginTop: 3, lineHeight: 1.25 }}>{d}</span>
+          </button>))}
+      </div>
+      <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '0 0 8px' }}>2 · HOW LONG SHOULD IT RUN?</p>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 6 }}>
         {plans.map(p => (
           <button key={p.days} onClick={() => setF(x => ({ ...x, days: p.days }))} style={{ padding: '12px 4px', borderRadius: 14, border: f.days === p.days ? '1.5px solid #fff' : `1px solid ${C.border}`, background: f.days === p.days ? 'linear-gradient(135deg,#8b2cf5,#ff2d95)' : 'rgba(255,255,255,.06)', color: 'white', cursor: 'pointer' }}>
@@ -112,7 +154,7 @@ export default function AdsTab({ snapFetch, showToast, coins = 0, onCoins }) {
       </div>
       {plan && !enough && <p style={{ color: '#f87171', fontSize: 13, margin: '4px 0 0' }}>You have {coins} coins. This plan needs {plan.coins}.</p>}
 
-      <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '16px 0 8px' }}>2 · YOUR AD</p>
+      <p style={{ color: C.gray, fontSize: 11, fontWeight: 800, letterSpacing: 1, margin: '16px 0 8px' }}>3 · YOUR AD</p>
       {preview ? (
         <div style={{ position: 'relative', marginBottom: 10 }}>
           {file?.type.startsWith('video/') ? <video src={preview} controls style={{ width: '100%', borderRadius: 12, maxHeight: 240 }} /> : <img src={preview} alt="" style={{ width: '100%', borderRadius: 12, maxHeight: 240, objectFit: 'cover' }} />}
@@ -142,7 +184,7 @@ export default function AdsTab({ snapFetch, showToast, coins = 0, onCoins }) {
         : ads.map(a => (
           <div key={a.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ color: 'white', fontWeight: 800 }}>{a.title}</span>
+              <span style={{ color: 'white', fontWeight: 800 }}>{a.title} <span style={{ color: C.gray, fontWeight: 700, fontSize: 11 }}>· {({ story: 'Story', post: 'Post', video: 'Video' })[a.placement || 'video']}</span></span>
               <span style={{ color: ST[a.status]?.[1], fontWeight: 700, fontSize: 13, flexShrink: 0 }}>{ST[a.status]?.[0]}</span>
             </div>
             <p style={{ color: C.gray, fontSize: 12.5, margin: '6px 0 0' }}>{a.days} day plan · {a.coinsPaid} coins{a.status === 'active' ? ` · ${left(a.endsAt)}` : ''}</p>

@@ -1,9 +1,10 @@
 // src/StoriesScreen.jsx — opened by the "storie" button on the feed: see everyone's stories and create your own.
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Plus, Flame, Eye } from 'lucide-react';
 import StoryCreator from './StoryCreator';
 import { timeAgo } from './StoryShared';
 import { OfficialPill } from './PostExtras';
+import { StoryAdSlide } from './AdsTab';
 
 const C = { pink: '#FF2D95', dark: '#07030F', card: '#150B28', border: 'rgba(180,76,255,0.30)', gray: '#A59BC4' };
 
@@ -50,8 +51,21 @@ export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast
   const unseen = others.filter(g => !g.allViewedByMe);
   const seen = others.filter(g => g.allViewedByMe);
 
-  const open = (g) => setViewing(g);
-  const closeViewer = () => { setViewing(null); load(); };   // reload so burned stories vanish right away
+  // Stories play one person after another: when someone's stories end it moves on to the next person by itself.
+  // Every few people a sponsored slide is squeezed in between — it is never listed on this screen.
+  const playlistRef = useRef([]), countRef = useRef(0);
+  const [adFor, setAdFor] = useState(null);
+  const open = (g) => { playlistRef.current = g === mine ? [g] : [...unseen, ...seen]; countRef.current = 0; setAdFor(null); setViewing(g); };
+  const closeViewer = () => { setViewing(null); setAdFor(null); load(); };
+  const goNext = async () => {
+    const list = playlistRef.current, i = list.findIndex(x => String(x.authorId) === String(viewing?.authorId)), nxt = list[i + 1];
+    if (!nxt) { closeViewer(); return; }
+    countRef.current += 1;
+    if (countRef.current % 3 === 0) {
+      try { const r = await snapFetch('/snapsa/promo/serve?placement=story'); const d = r.ok ? await r.json() : null; if (d?.ad) { setAdFor({ ad: d.ad, next: nxt }); return; } } catch {}
+    }
+    setViewing(nxt);
+  };   // reload so burned stories vanish right away
 
   const Card = ({ g }) => {
     const last = g.stories[g.stories.length - 1] || {};
@@ -98,7 +112,8 @@ export default function StoriesScreen({ onClose, snapFetch, mediaHref, showToast
       </div>
 
       {creating && <StoryCreator onClose={() => setCreating(false)} showToast={showToast} snapFetch={snapFetch} />}
-      {viewing && StoryViewer && <StoryViewer group={viewing} onClose={closeViewer} currentUser={currentUser} showToast={showToast} />}
+      {viewing && !adFor && StoryViewer && <StoryViewer key={viewing.authorId} group={viewing} onClose={closeViewer} onNextGroup={goNext} currentUser={currentUser} showToast={showToast} />}
+      {adFor && <StoryAdSlide ad={adFor.ad} snapFetch={snapFetch} mediaHref={mediaHref} onDone={() => { const n = adFor.next; setAdFor(null); setViewing(n); }} onClose={closeViewer} />}
     </div>
   );
 }

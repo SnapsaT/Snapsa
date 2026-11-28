@@ -75,7 +75,7 @@ export default function ShareSnapsaCard({ onClose, snapsaUsername, name, avatarU
   const link = profileLink(snapsaUsername || '');
   useEffect(() => { let alive = true; drawShareCard({ name: (name && name !== `@${snapsaUsername}`) ? name : '', username: snapsaUsername, avatarUrl, crewPosition }).then(c => { canvasRef.current = c; if (alive) setSrc(c.toDataURL('image/png')); }).catch(() => {}); return () => { alive = false; }; }, []);
   const blob = () => new Promise(r => canvasRef.current.toBlob(r, 'image/png'));
-  const save = async () => { if (!canvasRef.current) return; const b = await blob(); const u = URL.createObjectURL(b); const a = document.createElement('a'); a.href = u; a.download = `snapsa_${snapsaUsername || 'card'}.png`; a.click(); setTimeout(() => URL.revokeObjectURL(u), 3000); showToast?.('Card saved', 'success'); };
+  const save = async () => { if (!canvasRef.current) return; try { const b = await blob(); const { saveBlobToDevice } = await import('./native/saveMedia'); const r = await saveBlobToDevice(b, `snapsa_${snapsaUsername || 'card'}.png`); if (!r?.cancelled) showToast?.(`Card saved${r?.where ? ' to ' + r.where : ''}`, 'success'); } catch { showToast?.('Could not save the card', 'error'); } };
   const share = async () => {
     try { const b = await blob(); const f = new File([b], `snapsa_${snapsaUsername}.png`, { type: 'image/png' });
       if (navigator.canShare?.({ files: [f] })) { await navigator.share({ files: [f], text: `Connect with me on Snapsa: ${link}` }); return; }

@@ -43,10 +43,12 @@ import CoinTransferSheet from './CoinTransferSheet';
 import AdminCoinTransfers from './AdminCoinTransfers';
 import AdminOfficial from './AdminOfficial';
 import { OfficialPill } from './PostExtras';
+import { GroupsBar, SnapsaGroupChat } from './SnapsaGroups';
 import AdsTab, { AdminPromoReview, FeedAdSlide } from './AdsTab';
 import { Story3DPhoto, StoryVoicePlayer, StoryStickers } from './StoryExtras';
 import './SnapsaBottomNav.css';
 import { makeGreeting } from './ProfileGreetings';
+import { playSent, playIncoming, playRecStart, playRecCancel, playVoiceEnd } from './SnapsaSounds';
 // Capacitor already keeps the web view below the Android status bar, so the extra top inset must be 0 there (it was squeezing the header)
 try { if (window.Capacitor?.isNativePlatform?.()) document.documentElement.style.setProperty('--sat', '0px'); } catch {}
 import FeedLoader from './FeedLoader';
@@ -340,6 +342,8 @@ const fmt = n => {
 
 const triggerBrowserDownload = (url, filename) => {
   if (!url) return;
+  // in the Android app a plain link does nothing — save it into the phone's Gallery / Downloads instead
+  try { if (window.Capacitor?.isNativePlatform?.()) { import('./native/saveMedia').then(m => m.saveUrlToDevice(url, filename || 'snapsa_file')).catch(() => {}); return; } } catch {}
   const a = document.createElement('a');
   a.href = url;
   a.download = filename || '';
@@ -1023,12 +1027,12 @@ const startBackgroundSave = async (video, showToast) => {
   transferSet('down', { active: true, pct: 1, phase: 'sending', label: video?.authorName || 'Video' });
   try {
     const { saveVideoToDevice } = await import('./videoSave.js');
-    await saveVideoToDevice({
+    const saved = await saveVideoToDevice({
       videoId: video.id, authorName: video.authorName, snapUrl: SNAP_URL, authToken: getSnapToken(),
       onProgress: (pct) => transferSet('down', { pct: Math.max(1, Math.min(99, Math.round(pct))), phase: pct >= 80 ? 'processing' : 'sending' }),
     });
     transferFinish('down', true, 'Saved');
-    showToast?.('✅ Video saved!', 'success');
+    showToast?.(`✅ Video saved${saved?.where ? ' to ' + saved.where : ''}!`, 'success');
   } catch (err) {
     console.error('[Save]', err);
     transferFinish('down', false, 'Failed');
@@ -1339,7 +1343,7 @@ const overlayTextCss = (ts) => {
 };
 
 const mediaHref = (rel) =>
-  !rel ? null: rel.startsWith('http') ? rel : `${SNAP_URL}/snapsa/media/${rel}`;
+  !rel ? null: (rel.startsWith('http') || rel.startsWith('blob:') || rel.startsWith('data:')) ? rel : `${SNAP_URL}/snapsa/media/${rel}`;
 
 // ─── End-of-video Snapsa signature sound ─────────────
 let _snapEndCtx = null;
@@ -3030,7 +3034,7 @@ const SwipeableNotifRow = ({ n, onTap, onOpenProfile, onSwipeConfirm, splitTitle
 
 
 
-const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
+const StoryViewer = ({ group, onClose, onNextGroup, currentUser, showToast }) => {
   const [idx, setIdx] = useState(0);
   const [paused, setPaused] = useState(false);
   const [showSnapShot, setShowSnapShot] = useState(false);
@@ -3094,7 +3098,7 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
       const pct = Math.min(100, (elapsedRef.current / storyDurationMs) * 100);
       setProgressPct(pct);
       if (pct < 100) { progressRef.current = requestAnimationFrame(tick); }
-      else { cancelAnimationFrame(progressRef.current); if (idx < group.stories.length - 1) { setIdx(i => i+1); } else { onClose(); } }
+      else { cancelAnimationFrame(progressRef.current); if (idx < group.stories.length - 1) { setIdx(i => i+1); } else { (onNextGroup || onClose)(); } }
     };
     progressRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(progressRef.current);
@@ -3209,7 +3213,7 @@ const StoryViewer = ({ group, onClose, currentUser, showToast }) => {
     if (tapPct < 0.3) {
       if (idx > 0) setIdx(i => i - 1);
     } else {
-      if (idx < group.stories.length - 1) setIdx(i => i + 1); else onClose();
+      if (idx < group.stories.length - 1) setIdx(i => i + 1); else (onNextGroup || onClose)();
     }
   };
 
@@ -4932,13 +4936,8 @@ const DownloadProgressModal = ({ video, onClose, showToast }) => {
         setProgress(100);
         setStatus('Complete!');
         
-        // Auto-trigger download
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `snapsa_${video.authorName}_${video.id}.mp4`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        // Auto-trigger download (Gallery in the app)
+        try { const { saveBlobToDevice } = await import('./native/saveMedia'); await saveBlobToDevice(blob, `snapsa_${video.authorName}_${video.id}.mp4`); } catch {}
         
         showToast?.('✅ Download complete!', 'success');
         
@@ -8978,13 +8977,12 @@ const ShareSnapsaModal = ({ onClose, snapsaUsername, name, avatarUrl }) => {
         ctx.fillText(`@${snapsaUsername}`, 240, 650);
       }
 
-      canvas.toBlob(blob => {
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `snapsa_invite_${snapsaUsername || 'share'}.png`;
-        a.click();
-        URL.revokeObjectURL(url);
+      canvas.toBlob(async blob => {
+        try {
+          const { saveBlobToDevice } = await import('./native/saveMedia');
+          const r = await saveBlobToDevice(blob, `snapsa_invite_${snapsaUsername || 'share'}.png`);
+          if (!r?.cancelled) showToast?.(`✅ Card saved${r?.where ? ' to ' + r.where : ''}`, 'success');
+        } catch { showToast?.('Could not save the card', 'error'); }
       }, 'image/png');
     } catch (e) {
       console.error('[saveCard]', e);
@@ -15119,7 +15117,7 @@ const MsgStatusMoon = ({ status, readAt, onTapRead }) => {
       ><CheckCheck size={14}/></span>
     );
   }
-   if (status === 'queued') return <span title="Waiting for connection" style={{ display:'inline-flex', fontSize:11, opacity:0.85 }}>🕒</span>;
+   if (status === 'queued' || status === 'sending') return <span title={status === 'sending' ? 'Sending…' : 'Waiting for connection'} style={{ display:'inline-flex', fontSize:11, opacity:0.85 }}>🕒</span>;
   if (status === 'delivered') return <span title="Delivered" style={{ display:'inline-flex', color: S.gray, opacity: 0.85 }}><CheckCheck size={14}/></span>;
   return <span title="Sent" style={{ display:'inline-flex', color: S.gray, opacity: 0.6 }}><Check size={14}/></span>;
 };
@@ -15149,14 +15147,9 @@ const DMMediaViewer = ({ media, onClose, showToast }) => {
     try {
       const res = await fetch(media.url);
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `snapsa_${media.type}_${Date.now()}${media.type === 'video' ? '.mp4' : '.jpg'}`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      const { saveBlobToDevice } = await import('./native/saveMedia');
+      const r = await saveBlobToDevice(blob, `snapsa_${media.type}_${Date.now()}${media.type === 'video' ? '.mp4' : '.jpg'}`);
+      if (!r?.cancelled) showToast?.(`✅ Saved${r?.where ? ' to ' + r.where : ''}`, 'success');
     } catch {
       showToast?.('Could not download', 'error');
     }
@@ -15998,7 +15991,7 @@ const SnapVoiceMessageBubble = ({ src, duration = 0, isOwn, listened = false, on
     if (!a) return;
     const onTime = () => { setCurrent(a.currentTime); if (a.duration) setProgress(a.currentTime / a.duration); };
     const onLoaded = () => { if (a.duration && isFinite(a.duration)) setTotal(a.duration); };
-    const onEnd = () => { setPlaying(false); setProgress(0); setCurrent(0); };
+    const onEnd = () => { setPlaying(false); setProgress(0); setCurrent(0); playVoiceEnd(); };
     a.addEventListener('timeupdate', onTime);
     a.addEventListener('loadedmetadata', onLoaded);
     a.addEventListener('ended', onEnd);
@@ -16101,8 +16094,18 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
   const [fullscreenMedia, setFullscreenMedia] = useState(null);
   const [presence, setPresence] = useState({ online: !!chatUser.online, lastActiveAt: chatUser.lastActiveAt || null });
 
+  const tempRef = useRef([]);          // messages shown instantly while they are still being sent
+  const knownIdsRef = useRef(null);    // ids we have already seen, to know when a NEW message arrives
+  const isActiveRef = useRef(isActive); isActiveRef.current = isActive;
   const load = () => snapFetch(`/snapsa/messages/${chatUser.id||chatUser._id}`, { cache:'no-store' })
-    .then(r=>r.ok?r.json():null).then(d=>{ if(d?.messages) setMessages(d.messages); });
+    .then(r=>r.ok?r.json():null).then(d=>{
+      if (!d?.messages) return;
+      const me = String(currentUser?._id || currentUser?.id || '');
+      if (knownIdsRef.current && isActiveRef.current && document.visibilityState !== 'hidden'
+          && d.messages.some(m => !knownIdsRef.current.has(String(m._id)) && String(m.senderId) !== me && m.type !== 'system')) playIncoming();
+      knownIdsRef.current = new Set(d.messages.map(m => String(m._id)));
+      setMessages(tempRef.current.length ? [...d.messages, ...tempRef.current] : d.messages);
+    });
 
   useEffect(() => {
     const otherId = chatUser.id || chatUser._id;
@@ -16197,7 +16200,16 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
     const queuedText = text;
     if (burnNext) setBurnNext(false);
     setText('');
+    // show the message straight away (clock icon) — the drop sound + first tick come when the server has it
+    const tmpId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+    const f = opts.file;
+    const tmp = { _id: tmpId, _tmp: true, senderId: String(currentUser?._id || currentUser?.id || ''), type: f ? (opts.asFile ? 'file' : /^audio\//.test(f.type) ? 'voice' : /^video\//.test(f.type) ? 'video' : 'photo') : 'text',
+      text: queuedText, mediaUrl: f ? URL.createObjectURL(f) : null, fileName: f?.name, duration: opts.duration || 0, burn: !!extraFields.burn, status: 'sending', createdAt: new Date().toISOString() };
+    tempRef.current = [...tempRef.current, tmp];
+    setMessages(prev => [...prev, tmp]);
+    const dropTmp = () => { tempRef.current = tempRef.current.filter(x => x._id !== tmpId); setMessages(prev => prev.filter(x => x._id !== tmpId)); };
     const queueIt = async () => {
+      dropTmp();
       try {
         await outboxAdd({ kind: 'dm', target: String(chatUser.id || chatUser._id), fields: { text: queuedText, ...(opts.duration ? { duration: opts.duration } : {}), ...extraFields }, file: opts.file || null });
         showToast?.('No connection. Your message will send when you are online', 'info');
@@ -16209,13 +16221,17 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
       const wasNewChat = !hadMessagesRef.current;
       const res = await snapFetch(`/snapsa/messages/${chatUser.id||chatUser._id}`, { method:'POST', body:fd });
       if (res.ok) {
-        load();
+        playSent();
+        tempRef.current = tempRef.current.filter(x => x._id !== tmpId);
+        await load();
+        setMessages(prev => prev.filter(x => x._id !== tmpId));
         if (wasNewChat) onMessageSent?.();
       } else {
+        dropTmp();
         const err = await res.json().catch(() => ({}));
          showToast?.(res.status === 403 && err.error ? err.error : 'Failed to send', 'error');
       }
-    } catch (e) { if (isNetworkError(e)) await queueIt(); else showToast?.('Failed to send', 'error'); }
+    } catch (e) { if (isNetworkError(e)) await queueIt(); else { dropTmp(); showToast?.('Failed to send', 'error'); } }
   };
 
   const handleFile = e => { const f = e.target.files?.[0]; if (f) send({ file:f }); };
@@ -16305,22 +16321,36 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
       const blob = new Blob(chunksRef.current, { type: actualType });
       setVoiceDraft({ blob, ext, duration: Math.round(recDurationRef.current) });   // pick an effect, then send
     };
-    recRef.current = rec; recDurationRef.current = 0; recStartRef.current = Date.now();
-    rec.start();
+    // the "start" blip plays first, the recorder begins just after it so the blip is not in the voice note
+    rec._stream = stream;
+    recRef.current = rec; recDurationRef.current = 0; recStartRef.current = Date.now() + 240;
+    playRecStart();
+    setTimeout(() => { try { if (recRef.current === rec && rec.state === 'inactive' && !recCancelledRef.current) rec.start(); } catch {} }, 240);
     setRecStream(stream);
     setRecElapsed(0);
     setRecording(true);
-    recTimerRef.current = setInterval(() => setRecElapsed(Date.now() - recStartRef.current), 200);
+    recTimerRef.current = setInterval(() => setRecElapsed(Math.max(0, Date.now() - recStartRef.current)), 200);
+  };
+  // stop a recorder that may not have begun yet (quick tap) without throwing
+  const haltRecorder = (cancel) => {
+    const r = recRef.current;
+    if (!r) return;
+    if (r.state === 'inactive') {
+      try { r._stream?.getTracks().forEach(t => t.stop()); } catch {}
+      setRecStream(null); clearInterval(recTimerRef.current); recRef.current = null; recCancelledRef.current = true;
+    } else { try { r.stop(); } catch {} }
+    setRecording(false);
   };
   const stopRecording = () => {
     if (!recording) return;
-    recDurationRef.current = (Date.now() - recStartRef.current)/1000;
-    recRef.current?.stop(); setRecording(false);
+    recDurationRef.current = Math.max(0, (Date.now() - recStartRef.current) / 1000);
+    haltRecorder(false);
   };
   const cancelRecording = () => {
     if (!recording) return;
     recCancelledRef.current = true;
-    recRef.current?.stop(); setRecording(false);
+    haltRecorder(true);
+    playRecCancel();
     showToast?.('Voice note discarded', 'info');
   };
 
@@ -16379,7 +16409,7 @@ const SnapsaDMScreen = ({ currentUser, chatUser, onBack, showToast, onMessageSen
       {voiceDraft && (
         <VoiceDraft blob={voiceDraft.blob} ext={voiceDraft.ext} duration={voiceDraft.duration}
           onSend={(file, duration) => { setVoiceDraft(null); send({ file, duration }); }}
-          onDiscard={() => setVoiceDraft(null)} />
+          onDiscard={() => { setVoiceDraft(null); playRecCancel(); }} />
       )}
       {dmSafetyOpen && (
         <SafetySheet title={`@${chatUser.authorName || chatUser.username}`} onClose={()=>setDmSafetyOpen(false)}
@@ -17950,6 +17980,7 @@ const SnapsaAppInner = ({ onClose, currentUser: currentUserProp, userData, follo
   const [productStoreTarget, setProductStoreTarget] = useState(null); // {sellerId, productId?, featuringVideoId?}
   // Notifications is now a proper tab — no overlay state needed
   const [dmTarget, setDmTarget] = useState(null);
+  const [groupTarget, setGroupTarget] = useState(null);
   useEffect(() => { const h = (e) => { const u = e.detail || {}; setDmTarget({ ...u, fresh: true }); }; window.addEventListener('snapsa:openFreshChat', h); return () => window.removeEventListener('snapsa:openFreshChat', h); }, []);
   const [inboxRefreshKey, setInboxRefreshKey] = useState(0);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
@@ -18076,6 +18107,8 @@ snapFetch('/snapsa/me').then(r=>r.ok?r.json():null).then(d=>{
           window.dispatchEvent(new CustomEvent('snapsa:callSignal', { detail: msg }));
         } else if (msg.type === 'snapsa_dm_burned') {
           window.dispatchEvent(new CustomEvent('snapsa:dmBurned', { detail: msg }));
+        } else if (msg.type === 'snapsa_group') {
+          window.dispatchEvent(new CustomEvent('snapsa:groupUpdate', { detail: msg }));
         } else if (msg.type === 'snapsa_dm_deleted') {
           window.dispatchEvent(new CustomEvent('snapsa:dmDeleted', { detail: msg }));
         } else if (msg.type === 'new_notification') {
@@ -18196,7 +18229,7 @@ const snapApiInstance = useRef({
       window.dispatchEvent(new CustomEvent('snapsa:refreshFeed'));
       return;
     }
-    if (id === 'inbox') setDmTarget(null); // always land on the chats list, not a stale open thread
+    if (id === 'inbox') { setDmTarget(null); setGroupTarget(null); } // always land on the chats list, not a stale open thread
     setActiveTab(id);
   };
 
@@ -18212,6 +18245,7 @@ const snapApiInstance = useRef({
     if (viewProfile) { setViewProfile(null); return true; }
     if (showStories) { setShowStories(false); return true; }
     if (showPosts) { setShowPosts(false); return true; }
+    if (activeTab === 'inbox' && groupTarget) { setGroupTarget(null); return true; }
     if (activeTab === 'inbox' && dmTarget) { setDmTarget(null); return true; }
     if (activeTab !== 'feed') { setActiveTab('feed'); return true; }
     return false;
@@ -18474,11 +18508,17 @@ useEffect(() => {
                 Sign In
               </button>
             </div>
+          ) : groupTarget ? (
+            <SnapsaGroupChat snapFetch={snapFetch} group={groupTarget} currentUser={currentUser} showToast={showToast} onBack={()=>setGroupTarget(null)}
+              isActive={activeTab==='inbox'} mediaHref={mediaHref} onOpenProfile={handleViewProfile}/>
           ) : dmTarget ? (
             <SnapsaDMScreen currentUser={currentUser} chatUser={dmTarget} onBack={()=>setDmTarget(null)} showToast={showToast}
               onMessageSent={()=>setInboxRefreshKey(k=>k+1)} onMessagesRead={refreshUnreadCounts} isActive={activeTab==='inbox'} onOpenProfile={handleViewProfile}/>
           ) : (
-            <DMThreadsScreen currentUser={currentUser} onOpenChat={setDmTarget} refreshKey={inboxRefreshKey} isActive={activeTab==='inbox'}/>
+            <>
+              <GroupsBar snapFetch={snapFetch} showToast={showToast} currentUser={currentUser} onOpen={setGroupTarget} refreshKey={inboxRefreshKey} isActive={activeTab==='inbox'}/>
+              <DMThreadsScreen currentUser={currentUser} onOpenChat={setDmTarget} refreshKey={inboxRefreshKey} isActive={activeTab==='inbox'}/>
+            </>
           )}
           </ScreenErrorBoundary>
         </div>
