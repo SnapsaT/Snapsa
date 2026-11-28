@@ -17,7 +17,7 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4173,
+    port: 4040,
     host: true,
     allowedHosts: ['snapsa-ahdb.onrender.com'],
   }, 
