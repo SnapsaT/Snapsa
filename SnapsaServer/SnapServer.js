@@ -20,6 +20,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import Redis from 'ioredis';
 import admin from 'firebase-admin';
 import { registerSnapsaCrew } from './SnapsaCrew.js';
+import { registerSnapsaGroups } from './SnapsaGroups.js';
 import { registerSnapsaWallet, SnapsaWallet, SnapsaWalletApplication, SnapsaWalletPayout, SnapsaWalletEntry } from './SnapsaWallet.js';
 import Models from './Models.js';
 const { User, Post, Like, Comment, Share, Follower, Notification, FollowRequest } = Models;
@@ -2585,6 +2586,8 @@ app.get('/snapsa/messages/unread-count', snapAuth, async (req, res) => {
     res.json({ count });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
+
+registerSnapsaGroups(app, { snapAuth, uploadLimiter, uploadMessageMedia, uploadToCloudinary, cleanupTempFiles, config, SnapsaProfile, sendPushToUser, broadcastToUser, mediaUrl, path, fs, uuidv4, isSnapUserOnline });
 
 app.post('/snapsa/messages/:userId', snapAuth, uploadLimiter, uploadMessageMedia.single('media'), async (req, res) => {
   let tempPath = null;
@@ -7347,6 +7350,7 @@ const snapsaPromoSchema = new mongoose.Schema({
   text: { type: String, default: '' },
   mediaFile: { type: String, default: '' },
   mediaType: { type: String, enum: ['', 'photo', 'video'], default: '' },
+  placement: { type: String, enum: ['story', 'post', 'video'], default: 'video' },   // where the ad shows: between stories / in the Posts feed / in the video feed
   ctaLabel: { type: String, default: 'Learn more' },
   ctaUrl: { type: String, default: '' },
   days: { type: Number, required: true },
@@ -7361,7 +7365,7 @@ const snapsaPromoSchema = new mongoose.Schema({
 snapsaPromoSchema.index({ status: 1, endsAt: 1 });
 const SnapsaPromo = mongoose.models.SnapsaPromo || mongoose.model('SnapsaPromo', snapsaPromoSchema);
 const shapePromo = (a, mine) => ({
-  id: a._id, title: a.title, text: a.text, mediaUrl: a.mediaFile || null, mediaType: a.mediaType, ctaLabel: a.ctaLabel, ctaUrl: a.ctaUrl, ownerName: a.ownerName,
+  id: a._id, title: a.title, text: a.text, mediaUrl: a.mediaFile || null, mediaType: a.mediaType, placement: a.placement || 'video', ctaLabel: a.ctaLabel, ctaUrl: a.ctaUrl, ownerName: a.ownerName,
   ...(mine ? { days: a.days, coinsPaid: a.coinsPaid, status: a.status, rejectReason: a.rejectReason, startsAt: a.startsAt, endsAt: a.endsAt, impressions: a.impressions, clicks: a.clicks, createdAt: a.createdAt } : {}),
 });
 async function expirePromos() { await SnapsaPromo.updateMany({ status: 'active', endsAt: { $lte: new Date() } }, { $set: { status: 'expired' } }).catch(() => {}); }
@@ -7384,6 +7388,7 @@ app.post('/snapsa/promo', snapAuth, uploadLimiter, uploadStory.single('media'), 
     if (!plan) return res.status(400).json({ error: 'Choose how long the ad should run' });
     const title = String(req.body.title || '').trim().slice(0, 80);
     const text = String(req.body.text || '').trim().slice(0, 300);
+    const placement = ['story', 'post', 'video'].includes(req.body.placement) ? req.body.placement : 'video';
     if (title.length < 3) return res.status(400).json({ error: 'Add a headline' });
     let ctaUrl = String(req.body.ctaUrl || '').trim().slice(0, 300);
     if (ctaUrl && !/^https:\/\//i.test(ctaUrl)) return res.status(400).json({ error: 'The link must start with https://' });
@@ -7403,7 +7408,7 @@ app.post('/snapsa/promo', snapAuth, uploadLimiter, uploadStory.single('media'), 
     }
     const profile = await SnapsaProfile.findOne({ userId: req.userId }).select('username').lean();
     await awardCoins(req.userId, -plan.coins); charged = plan.coins;
-    const ad = await SnapsaPromo.create({ ownerId: req.userId, ownerName: profile?.username || '', title, text, mediaFile, mediaType, ctaLabel, ctaUrl, days: plan.days, coinsPaid: plan.coins });
+    const ad = await SnapsaPromo.create({ ownerId: req.userId, ownerName: profile?.username || '', title, text, mediaFile, mediaType, placement, ctaLabel, ctaUrl, days: plan.days, coinsPaid: plan.coins });
     await logCoinTransaction({ userId: req.userId, type: 'debit', amount: -plan.coins, description: `Ad: ${plan.days} day${plan.days > 1 ? 's' : ''}`, metadata: { promoId: String(ad._id) } }).catch(() => {});
     notifyAllAdmins({ senderId: req.userId, type: 'promo_review', title: 'New ad to review', body: `${title} · ${plan.days} days`, data: { promoId: String(ad._id) } }, req.userId);
     res.json({ success: true, ad: shapePromo(ad.toObject(), true), newBalance: balance - plan.coins });
@@ -7431,7 +7436,8 @@ app.get('/snapsa/promo/serve', snapAuth, async (req, res) => {
   try {
     const now = new Date();
     const hidden = req.userId ? await hiddenPrivateAuthorIds(req.userId).catch(() => []) : [];
-    const rows = await SnapsaPromo.aggregate([{ $match: { status: 'active', startsAt: { $lte: now }, endsAt: { $gt: now }, ownerId: { $nin: [req.userId ? new mongoose.Types.ObjectId(String(req.userId)) : null, ...hidden.map(h => new mongoose.Types.ObjectId(String(h)))] } } }, { $sample: { size: 1 } }]);
+    const want = ['story', 'post', 'video'].includes(req.query.placement) ? req.query.placement : null;   // older ads have no placement and still show everywhere
+    const rows = await SnapsaPromo.aggregate([{ $match: { status: 'active', ...(want ? { placement: { $in: [want, null] } } : {}), startsAt: { $lte: now }, endsAt: { $gt: now }, ownerId: { $nin: [req.userId ? new mongoose.Types.ObjectId(String(req.userId)) : null, ...hidden.map(h => new mongoose.Types.ObjectId(String(h)))] } } }, { $sample: { size: 1 } }]);
     res.json({ ad: rows[0] ? shapePromo(rows[0], false) : null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
