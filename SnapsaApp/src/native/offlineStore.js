@@ -6,7 +6,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Preferences } from '@capacitor/preferences';
 
-const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver.onrender.com';
+const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver-gzs4.onrender.com';
 const INDEX_KEY = 'snapsa_offline_index';
 const SETTINGS_KEY = 'snapsa_offline_settings';
 const DIR = 'snapsa-offline';
