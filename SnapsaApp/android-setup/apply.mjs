@@ -38,6 +38,22 @@ const metas = [
 for (const [name, val] of metas) {
   if (!mf.includes(name)) mf = mf.replace('</application>', `    <meta-data android:name="${name}" ${val} />\n    </application>`);
 }
+// Dark status bar / window (the web view sits below the bar, the strip behind it was showing up white)
+try {
+  const stPath = path.join(res, 'values', 'styles.xml');
+  if (fs.existsSync(stPath)) {
+    let st = fs.readFileSync(stPath, 'utf8');
+    if (!st.includes('snapsa_dark_bars')) {
+      st = st.replace(/(<style name="AppTheme\.NoActionBar"[^>]*>)/, `$1
+        <!-- snapsa_dark_bars -->
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">#05020A</item>
+        <item name="android:navigationBarColor">#05020A</item>
+        <item name="android:windowLightStatusBar">false</item>`);
+      fs.writeFileSync(stPath, st);
+    }
+  }
+} catch (e) { console.log('styles.xml tweak skipped:', e.message); }
 // snapsa://profile/<username> opens the app on that profile (QR cards, shared links)
 if (!mf.includes('android:scheme="snapsa"')) {
   mf = mf.replace('</activity>', `    <intent-filter>
@@ -77,6 +93,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
     registerPlugin(SnapsaRingtonePlugin.class);
+    registerPlugin(SnapsaMediaPlugin.class);
     super.onCreate(savedInstanceState);
     createSnapsaChannels();
     handleSnapsaLink(getIntent());
@@ -193,6 +210,84 @@ public class SnapsaRingtonePlugin extends Plugin {
   private void stopInternal() {
     try { if (ringtone != null) { ringtone.stop(); } } catch (Exception ignored) {}
     ringtone = null;
+  }
+}
+`);
+
+fs.writeFileSync(path.join(dir, 'SnapsaMediaPlugin.java'), `package ${pkg};
+
+import android.content.ContentResolver;
+import android.content.ContentValues;
+import android.media.MediaScannerConnection;
+import android.net.Uri;
+import android.os.Build;
+import android.os.Environment;
+import android.provider.MediaStore;
+import com.getcapacitor.JSObject;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+
+// Saves a file from the app cache into the phone's Gallery / Downloads so the person can find it.
+@CapacitorPlugin(name = "SnapsaMedia")
+public class SnapsaMediaPlugin extends Plugin {
+  @PluginMethod
+  public void saveToGallery(PluginCall call) {
+    String src = call.getString("path");
+    String name = call.getString("name");
+    String mime = call.getString("mime", "application/octet-stream");
+    String folder = call.getString("folder", "Snapsa");
+    if (src == null || name == null) { call.reject("path and name are needed"); return; }
+    try {
+      if (src.startsWith("file://")) src = Uri.parse(src).getPath();
+      File f = new File(src);
+      if (!f.exists()) { call.reject("file is missing"); return; }
+      boolean video = mime.startsWith("video/"), image = mime.startsWith("image/");
+      String base = video ? Environment.DIRECTORY_MOVIES : image ? Environment.DIRECTORY_PICTURES : Environment.DIRECTORY_DOWNLOADS;
+      Uri out;
+      if (Build.VERSION.SDK_INT >= 29) {
+        ContentResolver cr = getContext().getContentResolver();
+        ContentValues v = new ContentValues();
+        v.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+        v.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+        v.put(MediaStore.MediaColumns.RELATIVE_PATH, base + "/" + folder);
+        v.put(MediaStore.MediaColumns.IS_PENDING, 1);
+        Uri coll = video ? MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                 : image ? MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+                 : MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+        out = cr.insert(coll, v);
+        if (out == null) { call.reject("could not create the file"); return; }
+        try (InputStream in = new FileInputStream(f); OutputStream os = cr.openOutputStream(out)) { copy(in, os); }
+        ContentValues done = new ContentValues();
+        done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+        cr.update(out, done, null, null);
+      } else {
+        File dir = new File(Environment.getExternalStoragePublicDirectory(base), folder);
+        dir.mkdirs();
+        File o = new File(dir, name);
+        try (InputStream in = new FileInputStream(f); OutputStream os = new java.io.FileOutputStream(o)) { copy(in, os); }
+        MediaScannerConnection.scanFile(getContext(), new String[] { o.getAbsolutePath() }, new String[] { mime }, null);
+        out = Uri.fromFile(o);
+      }
+      JSObject r = new JSObject();
+      r.put("uri", out.toString());
+      r.put("where", base + "/" + folder);
+      call.resolve(r);
+    } catch (Exception e) {
+      call.reject(e.getMessage() == null ? "save failed" : e.getMessage());
+    }
+  }
+
+  private static void copy(InputStream in, OutputStream os) throws java.io.IOException {
+    byte[] buf = new byte[64 * 1024];
+    int n;
+    while ((n = in.read(buf)) > 0) os.write(buf, 0, n);
+    os.flush();
   }
 }
 `);
