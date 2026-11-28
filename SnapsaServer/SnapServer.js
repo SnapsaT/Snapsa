@@ -21,6 +21,7 @@ import Redis from 'ioredis';
 import admin from 'firebase-admin';
 import { registerSnapsaCrew } from './SnapsaCrew.js';
 import { registerSnapsaGroups } from './SnapsaGroups.js';
+import { createSnapsaFirewall } from './SnapsaFirewall.js';
 import { registerSnapsaWallet, SnapsaWallet, SnapsaWalletApplication, SnapsaWalletPayout, SnapsaWalletEntry } from './SnapsaWallet.js';
 import Models from './Models.js';
 const { User, Post, Like, Comment, Share, Follower, Notification, FollowRequest } = Models;
@@ -1560,6 +1561,11 @@ async function markSnapUserOffline(userId, wsId) {
 }
 
 const app = express();
+// ── Snapsa Firewall: EVERY request passes through here first. Attacks are dropped (connection closed, no answer). ──
+const fw = createSnapsaFirewall();
+app.disable('x-powered-by');
+app.set('trust proxy', true);
+app.use(fw.gate);
 
 // ── Snapsa Verified (pink check) for admin/founder Snapsa identities ──
 // Marks them with tier "snapsa" in every JSON response, so the app shows the
@@ -1611,10 +1617,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.set('trust proxy', 1);
+app.set('trust proxy', true);
 app.use((req, res, next) => { res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'); next(); });
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/snapsa/live/ws' });
+const server = http.createServer({ maxHeaderSize: 16384 }, app);
+server.headersTimeout = 30000; server.keepAliveTimeout = 65000; server.maxHeadersCount = 100;   // slow-connection attacks
+const wss = new WebSocketServer({ server, path: '/snapsa/live/ws', maxPayload: 2 * 1024 * 1024, verifyClient: (info) => fw.allowUpgrade(info.req) });
 
 const apiLimiter = rateLimit({ windowMs: 60000, max: 200 });
 const uploadLimiter = rateLimit({ windowMs: 60000, max: 12 });
@@ -1635,6 +1642,7 @@ app.use(express.json({
   limit: '15mb',
   verify: (req, _res, buf) => { req.rawBody = buf; },
 }));
+app.use(fw.inspect);   // firewall, part 2: database-injection / prototype-pollution check on the parsed request
 app.use(apiLimiter);
 
 registerSnapsaWallet(app, {
@@ -10520,6 +10528,7 @@ app.delete('/snapsa/avatar', snapAuth, async (req, res) => {
 });
 
 wss.on('connection', async (ws, req) => {
+  fw.wsOpened(req); ws.on('close', () => fw.wsClosed(req));
   const params = new URLSearchParams(req.url.split('?')[1] || '');
   const token = params.get('token');
   
@@ -10753,13 +10762,15 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
-app.use((err, req, res, next) => {
-  if (err.type === 'entity.too.large') {
-    console.error('[SnapServer] request body too large:', err.length, '>', err.limit);
-    return res.status(413).json({ error: 'That file is too large to upload.' });
-  }
-  console.error('[SnapServer]', err.message);
-  res.status(err.status || 500).json({ error: err.message || 'Internal error' });
+app.use(fw.errorHandler);   // never shows stack traces or internal messages
+
+// Admin view of the firewall: what it dropped, who is banned, lift a ban.
+app.get('/snapsa/admin/firewall', snapAuth, requireSnapAdmin, (req, res) => res.json(fw.snapshot()));
+app.post('/snapsa/admin/firewall/unban', snapAuth, requireSnapAdmin, (req, res) => {
+  if (req.body?.all) return res.json({ success: true, lifted: fw.unbanAll() });
+  const ip = String(req.body?.ip || '').trim();
+  if (!ip) return res.status(400).json({ error: 'ip required' });
+  res.json({ success: true, lifted: fw.unban(ip) ? 1 : 0 });
 });
 
 async function start() {
