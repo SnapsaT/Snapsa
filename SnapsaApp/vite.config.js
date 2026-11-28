@@ -17,13 +17,15 @@ export default defineConfig({
     },
   },
   server: {
-    port: 4040,
+    port: 4173,
     host: true,
     allowedHosts: ['snapsa-ahdb.onrender.com'],
-  },
+  }, 
   preview: {
-    allowedHosts: ['snapsa-ahdb.onrender.com'],
-  },
+  host: true,             // ← ADD THIS
+  port: 4173,             // ← Good to be explicit
+  allowedHosts: ['snapsa-ahdb.onrender.com'],
+},
   build: {
     outDir: 'dist',
     sourcemap: false,   // maps are never used by the app, and they were being packed into the APK
