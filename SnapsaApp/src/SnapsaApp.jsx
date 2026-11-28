@@ -42,6 +42,7 @@ import SendToChatSheet from './VideoShareExtras';
 import CoinTransferSheet from './CoinTransferSheet';
 import AdminCoinTransfers from './AdminCoinTransfers';
 import AdminOfficial from './AdminOfficial';
+import AdminFirewall from './AdminFirewall';
 import { OfficialPill } from './PostExtras';
 import { GroupsBar, SnapsaGroupChat } from './SnapsaGroups';
 import { friendlyError, LOST_CONNECTION } from './safeError';
@@ -59,6 +60,7 @@ import { CrewPill, WorkLine, WorkEditor, ShirtFlipButton, CrewShirtModal, AdminC
 import './SnapsaModals.css';
 import './SnapsaCyber.css';
 import './SnapsaNeon.css';
+import { AlienBackground } from './AlienUniverse';
 
 
 // ─── Language / i18n ─────────────────────────────────────────────────
@@ -242,97 +244,8 @@ const S = {
 };
 
 
-const OrbitPlanet = ({ radius, size, orbitDuration, spinDuration, delay, hue, ring, centerTop }) => {
-  const ringW = size * 2.3, ringH = size * 0.9;
-  return (
-    <div style={{
-      position:'absolute', top:centerTop, left:'50%', width:0, height:0,
-      animation:`orbitClockwise ${orbitDuration}s linear infinite`, animationDelay:`${delay}s`,
-    }}>
-      <div style={{ position:'absolute', left:radius, top:0, width:0, height:0 }}>
-        {ring && (
-          <div style={{
-            position:'absolute', left:0, top:0, width:ringW, height:ringH,
-            marginLeft:-ringW/2, marginTop:-ringH/2,
-            border:'1.5px solid rgba(255,255,255,0.5)', borderRadius:'50%',
-            transform:'rotate(-24deg)', boxShadow:'0 0 10px rgba(255,255,255,0.25)',
-          }}>
-            {[0, 60, 120, 180, 240, 300].map(deg => (
-              <div key={deg} style={{
-                position:'absolute', width:2, height:2, borderRadius:'50%', background:'white',
-                top:`${50 - 47*Math.sin(deg*Math.PI/180)}%`, left:`${50 + 47*Math.cos(deg*Math.PI/180)}%`,
-                animation:`twinkle ${1.4 + (deg%3)*0.4}s ease-in-out infinite`, animationDelay:`${deg/180}s`,
-              }}/>
-            ))}
-          </div>
-        )}
-        <div style={{
-          position:'absolute', left:0, top:0, width:size, height:size,
-          marginLeft:-size/2, marginTop:-size/2, borderRadius:'50%',
-          background:`radial-gradient(circle at 35% 30%, ${hue.light}, ${hue.mid} 60%, ${hue.dark})`,
-          boxShadow:`0 0 ${size*0.6}px ${hue.mid}66`,
-          animation:`planetSelfSpin ${spinDuration}s linear infinite`,
-        }}/>
-      </div>
-    </div>
-  );
-};
-
-// ─── Cosmic background used on every non-video screen ──────────────────────
-const CosmicBg = () => (
-  <div style={{
-    position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none', overflow: 'hidden',
-    background: 'radial-gradient(ellipse 80% 60% at 50% 0%, #1a0533 0%, #0B0B14 55%, #000 100%)',
-  }}>
-    {/* Star field */}
-    {Array.from({ length: 80 }).map((_, i) => (
-      <div key={i} style={{
-        position: 'absolute',
-        width: Math.random() > 0.85 ? 2.5 : 1.5,
-        height: Math.random() > 0.85 ? 2.5 : 1.5,
-        borderRadius: '50%',
-        background: 'white',
-        opacity: 0.15 + Math.random() * 0.55,
-        top: `${Math.random() * 100}%`,
-        left: `${Math.random() * 100}%`,
-        animation: `twinkle ${2 + Math.random() * 4}s ease-in-out infinite`,
-        animationDelay: `${Math.random() * 4}s`,
-      }}/>
-    ))}
-
-    {/* Milky-Way core — everything below orbits this point, clockwise */}
-    <div style={{
-      position:'absolute', top:'10%', left:'50%', width:160, height:160, marginLeft:-80, marginTop:-80,
-      borderRadius:'50%', filter:'blur(5px)', animation:'coreShimmer 5s ease-in-out infinite',
-      background:'radial-gradient(circle, rgba(255,255,255,0.85) 0%, rgba(210,180,255,0.45) 28%, rgba(124,58,237,0.2) 55%, transparent 78%)',
-    }}/>
-    <div style={{
-      position:'absolute', top:'10%', left:'50%', width:360, height:360, marginLeft:-180, marginTop:-180,
-      borderRadius:'50%', animation:'galaxySpin 100s linear infinite',
-      background:'conic-gradient(from 0deg, transparent 0deg, rgba(124,58,237,0.14) 70deg, transparent 150deg, rgba(255,32,85,0.12) 230deg, transparent 320deg, transparent 360deg)',
-    }}/>
-
-    {/* Orbiting, self-spinning, ringed planets — clockwise orbit + clockwise spin */}
-    <OrbitPlanet centerTop="10%" radius={130} size={44} orbitDuration={26} spinDuration={9}  delay={0}
-      hue={{ light:'#FF8FB3', mid:'#FF2055', dark:'#7C0033' }} ring/>
-    <OrbitPlanet centerTop="10%" radius={190} size={30} orbitDuration={40} spinDuration={14} delay={-12}
-      hue={{ light:'#C9B6FF', mid:'#7C3AED', dark:'#2E1065' }} ring/>
-    <OrbitPlanet centerTop="10%" radius={235} size={18} orbitDuration={58} spinDuration={7}  delay={-30}
-      hue={{ light:'#FFE9A8', mid:'#FFD600', dark:'#8a6d00' }} />
-
-    {/* Nebula glow spots */}
-    <div style={{ position:'absolute', top:'-10%', left:'30%', width:500, height:300, borderRadius:'50%', background:`radial-gradient(circle, #FF205522 0%, transparent 70%)`, filter:'blur(40px)' }}/>
-    <div style={{ position:'absolute', top:'40%', right:'-5%', width:400, height:400, borderRadius:'50%', background:`radial-gradient(circle, #7C3AED18 0%, transparent 70%)`, filter:'blur(50px)' }}/>
-    <div style={{ position:'absolute', bottom:'-5%', left:'10%', width:600, height:300, borderRadius:'50%', background:`radial-gradient(circle, #1a005322 0%, transparent 70%)`, filter:'blur(60px)' }}/>
-    <style>{`
-      @keyframes twinkle { 0%,100%{opacity:0.2} 50%{opacity:0.8} }
-      @keyframes orbitClockwise { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      @keyframes planetSelfSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      @keyframes galaxySpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-      @keyframes coreShimmer { 0%,100%{opacity:0.75} 50%{opacity:1} }
-    `}</style>
-  </div>
-);
+// ─── Alien-universe background used on every non-video screen (no planets / galaxy) ──
+const CosmicBg = () => <AlienBackground />;
 const fmt = n => {
   if (!n) return '0';
   if (n >= 1_000_000) return (n/1_000_000).toFixed(1)+'M';
@@ -11520,7 +11433,7 @@ const WalletAdminCardArt = ({ showToast }) => {
 
 const SnapWalletAdminScreen = ({ onClose, showToast }) => {
   const [tab, setTab] = useState('applications');
-  const tabs = [['applications', 'Applications'], ['assign', 'Account numbers'], ['coins', 'Coin transfers'], ['official', 'Official labels'], ['crew', 'Crew'], ['payouts', 'Withdrawals'], ['suspense', 'Unmatched'], ['card', 'Card design'], ['pins', 'PIN changes']];
+  const tabs = [['applications', 'Applications'], ['assign', 'Account numbers'], ['coins', 'Coin transfers'], ['official', 'Official labels'], ['crew', 'Crew'], ['payouts', 'Withdrawals'], ['suspense', 'Unmatched'], ['card', 'Card design'], ['pins', 'PIN changes'], ['firewall', 'Firewall']];
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'transparent', position: 'relative', zIndex: 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px', borderBottom: `1px solid ${S.border}` }}>
@@ -11541,6 +11454,7 @@ const SnapWalletAdminScreen = ({ onClose, showToast }) => {
         {tab === 'assign' && <WalletAdminAssign showToast={showToast} />}
         {tab === 'coins' && <AdminCoinTransfers snapFetch={snapFetch} showToast={showToast} />}
         {tab === 'official' && <AdminOfficial snapFetch={snapFetch} showToast={showToast} />}
+        {tab === 'firewall' && <AdminFirewall snapFetch={snapFetch} showToast={showToast} />}
         {tab === 'crew' && <AdminCrew snapFetch={snapFetch} showToast={showToast} />}
         {tab === 'payouts' && <WalletAdminPayouts showToast={showToast} />}
         {tab === 'suspense' && <WalletAdminSuspense />}   
@@ -14241,47 +14155,7 @@ const DynamicCoverBanner = ({ firstName }) => {
   
 
   return (
-    <div style={{ height:130, flexShrink:0, position:'relative', overflow:'hidden', background:'radial-gradient(ellipse 90% 80% at 50% 20%, #2a0a4a 0%, #0B0B14 70%)' }}>
-      {/* Moving planets / stars */}
-      <div style={{ position:'absolute', inset:0, overflow:'hidden' }}>
-        {Array.from({ length: 18 }).map((_, i) => (
-          <div key={i} style={{
-            position:'absolute',
-            width: 1 + Math.random()*2,
-            height: 1 + Math.random()*2,
-            borderRadius:'50%',
-            background:'white',
-            opacity: 0.2 + Math.random()*0.5,
-            top: `${Math.random()*100}%`,
-            left: `${Math.random()*100}%`,
-            animation: `twinkle ${2+Math.random()*3}s ease-in-out infinite`,
-            animationDelay: `${Math.random()*3}s`,
-          }}/>
-        ))}
-        {/* Drifting planets — each also spins clockwise on its own axis */}
-        <div style={{ position:'absolute', width:34, height:34, top:18, left:'-10%', animation:'driftRight 22s linear infinite' }}>
-          <div style={{ position:'absolute', width:60, height:26, left:-13, top:4, border:'1px solid rgba(255,255,255,0.4)', borderRadius:'50%', transform:'rotate(-24deg)' }}/>
-          <div style={{
-            width:34, height:34, borderRadius:'50%',
-            background:'radial-gradient(circle at 35% 30%, #FF8FB3, #FF2055 60%, #7C0033)',
-            boxShadow:'0 0 14px #FF205577', animation:'planetSelfSpin 9s linear infinite',
-          }}/>
-        </div>
-        <div style={{
-          position:'absolute', width:18, height:18, borderRadius:'50%', top:60, right:'-8%',
-          background:'radial-gradient(circle at 35% 30%, #C9B6FF, #7C3AED 60%, #2E1065)',
-          boxShadow:'0 0 10px #7C3AED77',
-          animation:'driftLeft 28s linear infinite, planetSelfSpin 12s linear infinite',
-        }}/>
-        <div style={{
-          position:'absolute', width:10, height:10, borderRadius:'50%', top:90, left:'20%',
-          background:'radial-gradient(circle at 35% 30%, #FFE9A8, #FFD600 60%, #8a6d00)',
-          boxShadow:'0 0 8px #FFD60066',
-          animation:'driftRight 16s linear infinite, planetSelfSpin 6s linear infinite',
-          animationDelay:'-4s',
-        }}/>
-      </div>
-
+    <div style={{ height:130, flexShrink:0, position:'relative', overflow:'hidden', background:'transparent' }}>
       {/* Scrolling brand phrase, right to left, one phrase at a time */}
       <div style={{ position:'absolute', top:14, left:0, right:0, display:'flex', justifyContent:'center', pointerEvents:'none' }}>
         <AnimatePresence mode="wait">
@@ -17499,7 +17373,6 @@ const HomeTopBar = ({ ownAvatar }) => {
     }}>
       <HeaderStars />
       <div style={{ position:'absolute', inset:0, overflow:'hidden', pointerEvents:'none' }}>
-        <div style={{ position:'absolute', width:14, height:14, borderRadius:'50%', top:6, left:'-10%', background:'radial-gradient(circle at 35% 30%, #FF8FB3, #FF2055 60%, #7C0033)', boxShadow:'0 0 8px #FF205577', animation:'topDriftRight 18s linear infinite, planetSelfSpin 7s linear infinite' }}/>
         <div style={{ position:'absolute', width:2, height:2, top:'20%', left:'10%', background:'white', borderRadius:'50%', boxShadow:'0 0 6px 1px white', animation:'shootingStar 6s linear infinite' }}/>
         <style>{`
           @keyframes topDriftRight { from { transform: translateX(0); } to { transform: translateX(140vw); } }
