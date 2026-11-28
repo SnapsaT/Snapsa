@@ -64,6 +64,10 @@ if (!mf.includes('android:scheme="snapsa"')) {
             </intent-filter>
         </activity>`);
 }
+// Hardening: no cloud backup of app data (it could be copied off the phone), no plain-http traffic
+if (!/android:allowBackup=/.test(mf)) mf = mf.replace('<application', '<application android:allowBackup="false"');
+else mf = mf.replace(/android:allowBackup="true"/, 'android:allowBackup="false"');
+if (!/android:usesCleartextTraffic=/.test(mf)) mf = mf.replace('<application', '<application android:usesCleartextTraffic="false"');
 fs.writeFileSync(mfPath, mf);
 
 // 4) Java: notification channels (custom sound / device ringtone) + the ringtone plugin
