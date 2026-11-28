@@ -360,6 +360,12 @@ try {
   console.error('⚠️ Firebase Admin failed to initialize:', err.message);
 }
 
+// A server running with the built-in fallback secret would let anyone forge login tokens — refuse to start instead.
+if ((process.env.NODE_ENV || '').toLowerCase() === 'production' || process.env.RENDER) {
+  const js = process.env.SNAP_JWT_SECRET || process.env.JWT_SECRET || '';
+  if (js.length < 16 || js === 'change-me') { console.error('FATAL: SNAP_JWT_SECRET is missing or too short (min 16 characters). Set it in Render → Environment.'); process.exit(1); }
+}
+
 const config = {
   port: parseInt(process.env.SNAP_PORT || '4040'),
   mongoUri: process.env.SNAP_MONGO_URI || process.env.MONGO_URI || '',
@@ -368,7 +374,7 @@ const config = {
   
   zkChallengeSecret: process.env.SNAPSA_ZK_CHALLENGE_SECRET || process.env.ZK_CHALLENGE_SECRET || null,
   uploadDir: process.env.SNAP_UPLOAD_DIR || path.join(__dirname, 'uploads/snapsa'),
-  origin: process.env.SNAP_ORIGIN ? process.env.SNAP_ORIGIN.split(',') : '*',
+  origin: [...new Set([...(process.env.SNAP_ORIGIN ? process.env.SNAP_ORIGIN.split(',').map(x => x.trim()).filter(Boolean) : []), 'https://snapsat.github.io', 'https://localhost', 'http://localhost', 'capacitor://localhost'])],
   maxVideoMb: parseInt(process.env.SNAP_MAX_VIDEO_MB || '500'),
   awsRegion: process.env.AWS_REGION || 'us-east-1',
   awsAccessKey: process.env.AWS_ACCESS_KEY_ID,
@@ -1564,7 +1570,7 @@ const app = express();
 // ── Snapsa Firewall: EVERY request passes through here first. Attacks are dropped (connection closed, no answer). ──
 const fw = createSnapsaFirewall();
 app.disable('x-powered-by');
-app.set('trust proxy', true);
+app.set('trust proxy', 1);   // exactly one proxy hop (Render) — visitors cannot fake their address with X-Forwarded-For
 app.use(fw.gate);
 
 // ── Snapsa Verified (pink check) for admin/founder Snapsa identities ──
@@ -1617,7 +1623,6 @@ app.use((req, res, next) => {
   next();
 });
 
-app.set('trust proxy', true);
 app.use((req, res, next) => { res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains'); next(); });
 const server = http.createServer({ maxHeaderSize: 16384 }, app);
 server.headersTimeout = 30000; server.keepAliveTimeout = 65000; server.maxHeadersCount = 100;   // slow-connection attacks
@@ -1628,7 +1633,7 @@ const uploadLimiter = rateLimit({ windowMs: 60000, max: 12 });
 const searchLimiter = rateLimit({ windowMs: 60000, max: 60 });
 
 app.use(cors({
-  origin: config.origin,
+  origin: (origin, cb) => cb(null, !origin || config.origin.includes(origin)),   // no Origin header = the app itself / server-to-server; other websites are refused
   credentials: true,
   exposedHeaders: ['Content-Length', 'Content-Range', 'Content-Type', 'X-Snapsa-Fallback', 'X-Snapsa-Watermark'],
 }));
@@ -1748,6 +1753,15 @@ async function snapAuth(req, res, next) {
     req.jwtPayload = null;
     next();
   }
+}
+
+// Same as snapAuth, but a missing / invalid login is refused (401) instead of continuing as "nobody".
+function snapAuthRequired(req, res, next) {
+  return snapAuth(req, res, (err) => {
+    if (err) return next(err);
+    if (!req.userId) return res.status(401).json({ error: 'Sign in required' });
+    next();
+  });
 }
 
 async function requireSnapAdmin(req, res, next) {
@@ -2750,7 +2764,7 @@ app.post('/snapsa/messages/message/:messageId/open', snapAuth, async (req, res) 
 
 const MESSAGE_REACTION_EMOJIS = ['😍', '😆', '😲', '❤️', '💯', '🙏', '👍', '👎', '✌🏻', '🤷‍♂️', '😭', '😋'];
 
-app.post('/snapsa/messages/message/:messageId/react', snapAuth, async (req, res) => {
+app.post('/snapsa/messages/message/:messageId/react', snapAuthRequired, async (req, res) => {
   try {
     const { emoji } = req.body;
     const msg = await SnapsaMessage.findById(req.params.messageId);
@@ -2787,7 +2801,7 @@ app.post('/snapsa/messages/message/:messageId/react', snapAuth, async (req, res)
   }
 });
 
-app.delete('/snapsa/messages/message/:messageId', snapAuth, async (req, res) => {
+app.delete('/snapsa/messages/message/:messageId', snapAuthRequired, async (req, res) => {
   try {
     const msg = await SnapsaMessage.findById(req.params.messageId);
     if (!msg) return res.status(404).json({ error: 'Message not found' });
@@ -3062,7 +3076,7 @@ app.get('/snapsa/me', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/me', snapAuth, async (req, res) => {
+app.post('/snapsa/me', snapAuthRequired, async (req, res) => {
   try {
     const { username, bio } = req.body;
     if (!username) return res.status(400).json({ error: 'Username required' });
@@ -3176,7 +3190,7 @@ app.put('/snapsa/privacy/in-circle', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/videos/upload', snapAuth, uploadLimiter, upload.single('video'), async (req, res) => {
+app.post('/snapsa/videos/upload', snapAuthRequired, uploadLimiter, upload.single('video'), async (req, res) => {
   let session = null;
   let tempVideoPath = null, tempThumbPath = null, tempWmarkPath = null, tempOverlayPath = null;
   let overlayHasDisc = false;
@@ -3312,8 +3326,6 @@ app.post('/snapsa/videos/upload', snapAuth, uploadLimiter, upload.single('video'
         }
       } catch (e) { console.error('[upload notify]', e.message); }
     })();
-    
-    await session.commitTransaction();
 
     notifyAllAdmins({
       senderId: req.userId, type: 'report_update',
@@ -3607,7 +3619,7 @@ app.get('/snapsa/videos/feed', snapAuth, async (req, res) => {
   }
 });     
   
-app.patch('/snapsa/videos/:id/privacy', snapAuth, async (req, res) => {
+app.patch('/snapsa/videos/:id/privacy', snapAuthRequired, async (req, res) => {
   try {
     const sv = await SnapsaVideo.findById(req.params.id);
     if (!sv) return res.status(404).json({ error: 'Not found' });
@@ -3624,7 +3636,7 @@ app.patch('/snapsa/videos/:id/privacy', snapAuth, async (req, res) => {
   }
 });
 
-app.delete('/snapsa/videos/:id', snapAuth, async (req, res) => {
+app.delete('/snapsa/videos/:id', snapAuthRequired, async (req, res) => {
   try {
     const sv = await SnapsaVideo.findById(req.params.id);
     if (!sv) return res.status(404).json({ error: 'Not found' });
@@ -3667,7 +3679,7 @@ app.get('/snapsa/videos/:id', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/videos/:id/like', snapAuth, async (req, res) => {
+app.post('/snapsa/videos/:id/like', snapAuthRequired, async (req, res) => {
   let session = null;
 
   try {
@@ -3719,7 +3731,7 @@ app.post('/snapsa/videos/:id/like', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/videos/:id/save', snapAuth, async (req, res) => {
+app.post('/snapsa/videos/:id/save', snapAuthRequired, async (req, res) => {
   try {
     const sv = await SnapsaVideo.findById(req.params.id).lean();
     if (!sv) return res.status(404).json({ error: 'Not found' });
@@ -3749,7 +3761,7 @@ app.post('/snapsa/videos/:id/save', snapAuth, async (req, res) => {
   }
 });
 
-app.get('/snapsa/videos/saved/mine', snapAuth, async (req, res) => {
+app.get('/snapsa/videos/saved/mine', snapAuthRequired, async (req, res) => {
   try {
     const saves = await SnapsaSavedVideo.find({ userId: req.userId })
       .sort({ createdAt: -1 })
@@ -3767,7 +3779,7 @@ app.get('/snapsa/videos/saved/mine', snapAuth, async (req, res) => {
   }
 });
 
-app.get('/snapsa/videos/liked/mine', snapAuth, async (req, res) => {
+app.get('/snapsa/videos/liked/mine', snapAuthRequired, async (req, res) => {
   try {
     const likes = await Like.find({ userId: req.userId })
       .sort({ createdAt: -1 })
@@ -4082,7 +4094,7 @@ app.post('/snapsa/videos/:id/shared', snapAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/snapsa/videos/:id/repost', snapAuth, async (req, res) => {
+app.post('/snapsa/videos/:id/repost', snapAuthRequired, async (req, res) => {
   try {
     const sv = await SnapsaVideo.findById(req.params.id).lean();
     if (!sv) return res.status(404).json({ error: 'Not found' });
@@ -4221,7 +4233,7 @@ app.post('/snapsa/notifications/:id/read', snapAuth, async (req, res) => {
   catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.delete('/snapsa/notifications/:id', snapAuth, async (req, res) => {
+app.delete('/snapsa/notifications/:id', snapAuthRequired, async (req, res) => {
   try {
     const n = await Notification.findById(req.params.id);
     if (!n) return res.status(404).json({ error: 'Not found' });
@@ -4231,7 +4243,7 @@ app.delete('/snapsa/notifications/:id', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.delete('/snapsa/notifications', snapAuth, async (req, res) => {
+app.delete('/snapsa/notifications', snapAuthRequired, async (req, res) => {
   try {
     await Notification.deleteMany({ recipientId: req.userId });
     res.json({ success: true });
@@ -4254,7 +4266,7 @@ app.post('/snapsa/notifications/mark-all-read', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/stories', snapAuth, uploadLimiter, uploadStory.single('media'), async (req, res) => {
+app.post('/snapsa/stories', snapAuthRequired, uploadLimiter, uploadStory.single('media'), async (req, res) => {
   let tempPath = null;
   try {
     const profile = await SnapsaProfile.findOne({ userId: req.userId }).lean();
@@ -4323,7 +4335,7 @@ app.post('/snapsa/stories', snapAuth, uploadLimiter, uploadStory.single('media')
   }
 });
 
-app.get('/snapsa/stories/feed', snapAuth, async (req, res) => {
+app.get('/snapsa/stories/feed', snapAuthRequired, async (req, res) => {
   try {
     const myFollowing = req.userId ? (await Follower.find({ followerId: req.userId }).select('followingId').lean()).map(f => String(f.followingId)) : [];
     const stories = await SnapsaStory.find({
@@ -4418,7 +4430,7 @@ app.post('/snapsa/stories/:id/view', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.get('/snapsa/stories/:id/viewers', snapAuth, async (req, res) => {
+app.get('/snapsa/stories/:id/viewers', snapAuthRequired, async (req, res) => {
   try {
     const story = await SnapsaStory.findById(req.params.id).lean();
     if (!story) return res.status(404).json({ error: 'Not found' });
@@ -4753,7 +4765,7 @@ app.post('/snapsa/posts/:id/comments', snapAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/snapsa/posts/:id', snapAuth, async (req, res) => {
+app.delete('/snapsa/posts/:id', snapAuthRequired, async (req, res) => {
   try {
     if (!guardId(req, res)) return;
     const r = await SnapsaPost.deleteOne({ _id: req.params.id, authorId: req.userId });
@@ -4798,7 +4810,7 @@ app.get('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
+app.post('/snapsa/videos/:id/comments', snapAuthRequired, async (req, res) => {
   let session = null;
 
   try {
@@ -4852,7 +4864,7 @@ app.post('/snapsa/videos/:id/comments', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/sounds/upload', snapAuth, uploadLimiter, upload.single('audio'), async (req, res) => {
+app.post('/snapsa/sounds/upload', snapAuthRequired, uploadLimiter, upload.single('audio'), async (req, res) => {
   let tempAudioPath = null, tempThumbPath = null;
   try {
     if (!req.file) return res.status(400).json({ error: 'No audio file' });
@@ -5783,69 +5795,6 @@ async function decideCreatorProfile(req, res, decision) {
 app.post('/snapsa/admin/creator-profiles/:userId/:type/approve', snapAuth, requireSnapAdmin, (req, res) => decideCreatorProfile(req, res, 'approved'));
 app.post('/snapsa/admin/creator-profiles/:userId/:type/reject', snapAuth, requireSnapAdmin, (req, res) => decideCreatorProfile(req, res, 'rejected'));
 
-app.get('/snapsa/music/artist-profile/mine', snapAuth, async (req, res) => {
-  try {
-    if (!req.userId) return res.status(401).json({ error: 'Sign in required' });
-    const profile = await SnapsaProfile.findOne({ userId: req.userId }).select('artistProfile').lean();
-    if (!profile?.artistProfile?.enabled) return res.json({ artistProfile: null });
-    const trackCount = await SnapsaTrack.countDocuments({ artistId: req.userId });
-    res.json({ artistProfile: { ...profile.artistProfile, trackCount } });
-  } catch (error) { res.status(500).json({ error: error.message }); }
-});
-
-app.post('/snapsa/music/artist-profile', snapAuth, async (req, res) => {
-  try {
-    if (!req.userId) return res.status(401).json({ error: 'Sign in required' });
-    const artistName = (req.body.artistName || '').trim();
-    const country = (req.body.country || '').trim();
-    if (!artistName) return res.status(400).json({ error: 'Artist name is required' });
-    if (!country) return res.status(400).json({ error: 'Country is required' });
-
-    const ACCOUNT_TYPES = ['artist','tv_channel','radio_station','podcast','news_channel'];
-    const accountType = ACCOUNT_TYPES.includes(req.body.accountType) ? req.body.accountType : 'artist';
-    const update = {
-      'artistProfile.enabled': true,
-      'artistProfile.accountType': accountType,
-      'artistProfile.artistName': artistName.slice(0, 60),
-      'artistProfile.country': country.slice(0, 60),
-      'artistProfile.genre': accountType === 'artist' ? (req.body.genre || '').trim().slice(0, 60) : '',
-      'artistProfile.bio': (req.body.bio || '').slice(0, 300),
-    };
-    if (req.body.avatarBase64) {
-      const uploaded = await uploadBase64ToCloudinary(req.body.avatarBase64, { resourceType: 'image', folder: 'snapsa/artist_avatars' });
-      update['artistProfile.avatarUrl'] = uploaded.secure_url;
-      update['artistProfile.avatarPublicId'] = uploaded.public_id;
-    }
-    if (accountType === 'tv_channel' && req.body.subscriptionPriceCoins != null) {
-      const price = Math.max(0, Math.round(Number(req.body.subscriptionPriceCoins) || 0));
-      update['artistProfile.subscriptionPriceCoins'] = price;
-    }
-
-    const profile = await SnapsaProfile.findOneAndUpdate(
-      { userId: req.userId }, { $set: update }, { upsert: true, new: true, runValidators: true }
-    ).lean();
-
-    
-    
-    
-    
-    
-    
-    
-    if (!profile?.artistProfile?.enabled || profile.artistProfile.artistName !== artistName.slice(0, 60)) {
-      console.error('[music/artist-profile] write did not persist as expected for user', req.userId, '— got:', profile?.artistProfile);
-      return res.status(500).json({
-        error: "Your artist profile didn't save properly. This is a server-side data issue — please try again, and if it keeps happening let support know.",
-      });
-    }
-
-    res.json({ success: true, artistProfile: { ...profile.artistProfile, trackCount: await SnapsaTrack.countDocuments({ artistId: req.userId }) } });
-  } catch (error) {
-    console.error('[music/artist-profile]', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
 app.get('/snapsa/music/artist/mine/stats', snapAuth, async (req, res) => {
   try {
     if (!req.userId) return res.status(401).json({ error: 'Sign in required' });
@@ -6431,7 +6380,7 @@ app.get('/snapsa/tv/channel/mine/shows', snapAuth, async (req, res) => {
 app.post('/snapsa/tv/shows', snapAuth, async (req, res) => {
   try {
     if (!req.userId) return res.status(401).json({ error: 'Sign in required' });
-    const profile = creatorSwap(await SnapsaProfile.findOne({ userId: channelId }).lean(), 'tv_channel');
+    const profile = creatorSwap(await SnapsaProfile.findOne({ userId: req.userId }).lean(), 'tv_channel');
     if (!profile?.artistProfile?.enabled || profile.artistProfile.accountType !== 'tv_channel') {
 
       return res.status(403).json({ error: 'Create a TV Channel profile before adding a show', code: 'CHANNEL_PROFILE_REQUIRED' });
@@ -7380,7 +7329,7 @@ async function expirePromos() { await SnapsaPromo.updateMany({ status: 'active',
 
 app.get('/snapsa/promo/options', snapAuth, (req, res) => res.json({ plans: PROMO_PLANS.map(p => ({ ...p, usd: +(p.coins * SNAPSA_COIN_VALUE_USD).toFixed(2) })) }));
 
-app.get('/snapsa/promo/mine', snapAuth, async (req, res) => {
+app.get('/snapsa/promo/mine', snapAuthRequired, async (req, res) => {
   try {
     await expirePromos();
     const rows = await SnapsaPromo.find({ ownerId: req.userId }).sort({ createdAt: -1 }).limit(50).lean();
@@ -7428,7 +7377,7 @@ app.post('/snapsa/promo', snapAuth, uploadLimiter, uploadStory.single('media'), 
 });
 
 // Cancel: a waiting ad is refunded in full. A running ad stops without a refund.
-app.post('/snapsa/promo/:id/cancel', snapAuth, async (req, res) => {
+app.post('/snapsa/promo/:id/cancel', snapAuthRequired, async (req, res) => {
   try {
     if (!guardId(req, res)) return;
     const ad = await SnapsaPromo.findOneAndUpdate({ _id: req.params.id, ownerId: req.userId, status: { $in: ['pending', 'active'] } }, { $set: { status: 'cancelled' } });
@@ -7492,7 +7441,7 @@ app.get('/snapsa/ads/:adId', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/ads/:adId/like', snapAuth, async (req, res) => {
+app.post('/snapsa/ads/:adId/like', snapAuthRequired, async (req, res) => {
   try {
     const adId = req.params.adId;
     if (!SNAPSA_ADS.has(adId)) return res.status(404).json({ error: 'Ad not found' });
@@ -7576,7 +7525,7 @@ const notifyVerifyUser = (userId, title, body, kind) => createSnapNotification({
 }).catch(() => {});
 
 // User: my status, price and the choices
-app.get('/snapsa/verification/me', snapAuth, async (req, res) => {
+app.get('/snapsa/verification/me', snapAuthRequired, async (req, res) => {
   try {
     const v = await SnapsaVerification.findOne({ userId: req.userId }).lean();
     const permanent = (await getSnapAdminIds()).includes(String(req.userId));
@@ -7595,7 +7544,7 @@ app.get('/snapsa/verification/me', snapAuth, async (req, res) => {
 });
 
 // User: ask admin for the badge for 1, 3, 6 or 12 months
-app.post('/snapsa/verification/request', snapAuth, async (req, res) => {
+app.post('/snapsa/verification/request', snapAuthRequired, async (req, res) => {
   try {
     const months = parseInt(req.body?.months, 10);
     if (!VERIFIED_MONTH_OPTIONS.includes(months)) return res.status(400).json({ error: 'Choose 1, 3, 6 or 12 months' });
@@ -8479,7 +8428,7 @@ app.post('/snapsa/admin/users/:userId/erase', snapAuth, requireSnapAdmin, async 
 // Live Stream Routes
 // ============================================================================
 
-app.get('/snapsa/live/channel/:channelName/credentials', snapAuth, async (req, res) => {
+app.get('/snapsa/live/channel/:channelName/credentials', snapAuthRequired, async (req, res) => {
   try {
     const profile = await SnapsaProfile.findOne({ userId: req.userId });
     const username = profile?.username || req.jwtPayload?.name || req.userId.slice(-8);
@@ -8560,7 +8509,7 @@ app.get('/snapsa/live/channel/:channelName/playback', snapAuth, async (req, res)
   }
 });
 
-app.post('/snapsa/live/chat/token', snapAuth, async (req, res) => {
+app.post('/snapsa/live/chat/token', snapAuthRequired, async (req, res) => {
   try {
     const { channelName, userId, userName } = req.body;
 
@@ -8743,7 +8692,7 @@ app.post('/snapsa/live/gift', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/live/channel/:channelName/end', snapAuth, async (req, res) => {
+app.post('/snapsa/live/channel/:channelName/end', snapAuthRequired, async (req, res) => {
   let session = null;
 
   try {
@@ -9702,7 +9651,7 @@ app.get('/snapsa/wallet/coin-history', snapAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/snapsa/wallet/balance', snapAuth, async (req, res) => {
+app.get('/snapsa/wallet/balance', snapAuthRequired, async (req, res) => {
   try {
     
     
@@ -9787,7 +9736,7 @@ app.post('/snapsa/wallet/transfer-from-coins', snapAuth, async (req, res) => {
 
 const MIN_WITHDRAWAL_COINS = 10;
 
-app.post('/snapsa/wallet/withdraw-request', snapAuth, async (req, res) => {
+app.post('/snapsa/wallet/withdraw-request', snapAuthRequired, async (req, res) => {
   let session = null;
   try {
     const { accountHolderName, bankName, accountNumber, branchCode, email, amount } = req.body || {};
@@ -9887,7 +9836,7 @@ app.post('/snapsa/wallet/withdraw-request', snapAuth, async (req, res) => {
   }
 });
 
-app.get('/snapsa/wallet/withdraw-requests', snapAuth, async (req, res) => {
+app.get('/snapsa/wallet/withdraw-requests', snapAuthRequired, async (req, res) => {
   try {
     const requests = await SnapsaWithdrawalRequest.find({ userId: req.userId })
       .sort({ createdAt: -1 })
@@ -9969,7 +9918,7 @@ app.post('/snapsa/wallet/send-coins', snapAuth, async (req, res) => {
 });
 
 
-app.post('/snapsa/store/purchase', snapAuth, async (req, res) => {
+app.post('/snapsa/store/purchase', snapAuthRequired, async (req, res) => {
   let session = null;
   try {
     const items = Array.isArray(req.body.items) ? req.body.items : [];
@@ -10026,7 +9975,7 @@ app.post('/snapsa/store/purchase', snapAuth, async (req, res) => {
   }
 });
 
-app.get('/snapsa/watch-progress', snapAuth, async (req, res) => {
+app.get('/snapsa/watch-progress', snapAuthRequired, async (req, res) => {
   try {
     const profile = await SnapsaProfile.findOne({ userId: req.userId }).lean();
     const today = todayStr();
@@ -10040,7 +9989,7 @@ app.get('/snapsa/watch-progress', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/watch-progress', snapAuth, async (req, res) => {
+app.post('/snapsa/watch-progress', snapAuthRequired, async (req, res) => {
   try { 
     
     const deltaMs = Math.max(0, Math.min(45000, parseInt(req.body.deltaMs) || 0));
@@ -10087,7 +10036,7 @@ app.post('/snapsa/watch-progress', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.patch('/snapsa/store', snapAuth, async (req, res) => {
+app.patch('/snapsa/store', snapAuthRequired, async (req, res) => {
   try {
     const { enabled, name, description, contact, location } = req.body;
     const update = {};
@@ -10138,14 +10087,14 @@ app.get('/snapsa/store/:userId', snapAuth, async (req, res) => {
 });
 
 // --- Products ----------------------------------------------------------------
-app.get('/snapsa/store/mine/products', snapAuth, async (req, res) => {
+app.get('/snapsa/store/mine/products', snapAuthRequired, async (req, res) => {
   try {
     const products = await SnapsaProduct.find({ sellerId: req.userId }).sort({ createdAt: -1 }).lean();
     res.json({ products, coinValueZar: SNAPSA_COIN_VALUE_ZAR });
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/store/products', snapAuth, async (req, res) => {
+app.post('/snapsa/store/products', snapAuthRequired, async (req, res) => {
   try {
     const { title, description, price, location, category, images, affiliateCommissionPct } = req.body;
     if (!title || !String(title).trim()) return res.status(400).json({ error: 'Title is required' });
@@ -10180,7 +10129,7 @@ app.post('/snapsa/store/products', snapAuth, async (req, res) => {
   }
 });
 
-app.put('/snapsa/store/products/:productId', snapAuth, async (req, res) => {
+app.put('/snapsa/store/products/:productId', snapAuthRequired, async (req, res) => {
   try {
     const product = await SnapsaProduct.findById(req.params.productId);
     if (!product) return res.status(404).json({ error: 'Product not found' });
@@ -10216,7 +10165,7 @@ app.put('/snapsa/store/products/:productId', snapAuth, async (req, res) => {
   }
 });
 
-app.delete('/snapsa/store/products/:productId', snapAuth, async (req, res) => {
+app.delete('/snapsa/store/products/:productId', snapAuthRequired, async (req, res) => {
   try {
     const product = await SnapsaProduct.findById(req.params.productId);
     if (!product) return res.status(404).json({ error: 'Product not found' });
@@ -10283,7 +10232,7 @@ app.get('/snapsa/marketplace/stores', snapAuth, async (req, res) => {
   }
 });
 
-app.post('/snapsa/videos/:videoId/featured-products', snapAuth, async (req, res) => {
+app.post('/snapsa/videos/:videoId/featured-products', snapAuthRequired, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.videoId)) return res.status(400).json({ error: 'Invalid video' });
     
@@ -10329,7 +10278,7 @@ app.get('/snapsa/videos/:videoId/featured-products', snapAuth, async (req, res) 
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/store/products/:productId/tag', snapAuth, async (req, res) => {
+app.post('/snapsa/store/products/:productId/tag', snapAuthRequired, async (req, res) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(req.params.productId)) return res.status(400).json({ error: 'Invalid product' });
     const product = await SnapsaProduct.findOne({ _id: req.params.productId, active: true }).lean();
@@ -10385,7 +10334,7 @@ app.post('/snapsa/store/products/:productId/tag', snapAuth, async (req, res) => 
   }
 });
 
-app.get('/snapsa/store/leads', snapAuth, async (req, res) => {
+app.get('/snapsa/store/leads', snapAuthRequired, async (req, res) => {
   try {
     const filter = { sellerId: req.userId };
     if (req.query.status) filter.status = req.query.status;
@@ -10397,7 +10346,7 @@ app.get('/snapsa/store/leads', snapAuth, async (req, res) => {
   } catch (error) { res.status(500).json({ error: error.message }); }
 });
 
-app.post('/snapsa/store/leads/:leadId/mark-sold', snapAuth, async (req, res) => {
+app.post('/snapsa/store/leads/:leadId/mark-sold', snapAuthRequired, async (req, res) => {
   try {
     const lead = await SnapsaProductLead.findById(req.params.leadId);
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
@@ -10438,7 +10387,7 @@ app.post('/snapsa/store/leads/:leadId/mark-sold', snapAuth, async (req, res) => 
   }
 });
 
-app.post('/snapsa/avatar', snapAuth, async (req, res) => {
+app.post('/snapsa/avatar', snapAuthRequired, async (req, res) => {
   try {
     const { avatar } = req.body;
     if (!avatar) {
@@ -10498,7 +10447,7 @@ app.post('/snapsa/avatar', snapAuth, async (req, res) => {
   }
 });
 
-app.delete('/snapsa/avatar', snapAuth, async (req, res) => {
+app.delete('/snapsa/avatar', snapAuthRequired, async (req, res) => {
   try {
     const profile = await SnapsaProfile.findOne({ userId: req.userId });
     if (!profile) {
@@ -10762,16 +10711,22 @@ setInterval(async () => {
   }
 }, 60 * 1000);
 
-app.use(fw.errorHandler);   // never shows stack traces or internal messages
+// Health / ping: tiny, generic answer (Render and uptime tools use it). The Firewall screen can switch it off.
+app.get(['/', '/health', '/healthz', '/ping'], (req, res) => res.json({ ok: true }));
 
-// Admin view of the firewall: what it dropped, who is banned, lift a ban.
-app.get('/snapsa/admin/firewall', snapAuth, requireSnapAdmin, (req, res) => res.json(fw.snapshot()));
-app.post('/snapsa/admin/firewall/unban', snapAuth, requireSnapAdmin, (req, res) => {
-  if (req.body?.all) return res.json({ success: true, lifted: fw.unbanAll() });
-  const ip = String(req.body?.ip || '').trim();
-  if (!ip) return res.status(400).json({ error: 'ip required' });
-  res.json({ success: true, lifted: fw.unban(ip) ? 1 : 0 });
-});
+// Firewall control screen (admin only) + database storage for its settings and bans
+const SnapsaFirewallState = mongoose.model('SnapsaFirewallState', new mongoose.Schema({ _id: String, cfg: mongoose.Schema.Types.Mixed, pending: mongoose.Schema.Types.Mixed }, { minimize: false }));
+const SnapsaFirewallBan = mongoose.model('SnapsaFirewallBan', new mongoose.Schema({ ip: { type: String, unique: true }, until: Date, count: Number, reason: String }));
+fw.registerAdmin(app, { snapAuth, requireSnapAdmin });
+fw.buildRegistry(app);   // default deny: from now on only the routes registered above are let through
+app.use(fw.errorHandler);   // last of all: never shows stack traces or internal messages
+const fwStore = {
+  loadConfig: async () => { const d = await SnapsaFirewallState.findById('main').lean(); return d ? { cfg: d.cfg, pending: d.pending } : null; },
+  saveConfig: async ({ cfg, pending }) => { await SnapsaFirewallState.findByIdAndUpdate('main', { cfg, pending: pending || null }, { upsert: true }); },
+  loadBans: async () => SnapsaFirewallBan.find({ until: { $gt: new Date() } }).lean(),
+  saveBan: async (b) => { await SnapsaFirewallBan.findOneAndUpdate({ ip: b.ip }, b, { upsert: true }); },
+  deleteBan: async (ip) => { await SnapsaFirewallBan.deleteOne({ ip }); },
+};
 
 async function start() {
   if (mongoose.connection.readyState < 1 && config.mongoUri) {
@@ -10780,6 +10735,7 @@ async function start() {
       maxPoolSize: 10
     });
         console.log('✅ MongoDB connected');
+    fw.attachStore(fwStore).catch(() => {});   // load the saved firewall settings + bans
     await runCryptoSelfTest(); // switches encryption of new messages/stories/country on only if it proves itself  
     
     try {
