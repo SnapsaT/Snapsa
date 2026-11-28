@@ -93,7 +93,7 @@ async function normalizeAvatarFile(file) {
   }, 'image/jpeg', 0.85));
 }
 
-const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver.onrender.com';
+const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver-gzs4.onrender.com';
 const SNAPSA_OWN_TOKEN_KEY = 'snapsa_own_token';
 const SNAPSA_LOGGED_OUT_FLAG = 'snapsa_logged_out';
 const persistOwnSession = (token) => {
