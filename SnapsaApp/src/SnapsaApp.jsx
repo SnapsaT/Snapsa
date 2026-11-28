@@ -641,7 +641,7 @@ const BEAUTY_FILTERS = [
   { id: 'porcelain',   name: 'Porcelain',    icon: '🤍', css: 'brightness(1.15) contrast(0.86) saturate(0.9)', smooth: 0.55 },
 ];
 
-const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver.onrender.com';
+const SNAP_URL = import.meta?.env?.VITE_SNAP_URL || 'https://snapsaserver-gzs4.onrender.com';
 const SNAPSA_OWN_TOKEN_KEY = 'snapsa_own_token';
 const SNAPSA_LOGGED_OUT_FLAG = 'snapsa_logged_out';
 let _activeToken = null;
